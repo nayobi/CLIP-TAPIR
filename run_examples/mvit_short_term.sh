@@ -1,8 +1,8 @@
 # Experiment setup
 FOLD="2" # Fold of the cross-validation split.
 EXP_NAME="TAPIR_Intruments"
-TASK="TOOLS" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
-CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/INSTRUMENTS/checkpoint_best_intruments_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
+TASK="ACTIONS" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
+CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/ACTIONS/checkpoint_best_actions_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
 
 #-------------------------
 DATA_VER="psi-ava"
@@ -29,7 +29,7 @@ NUM_GPUS 1 \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
 TRAIN.CHECKPOINT_EPOCH_RESET True \
 TRAIN.CHECKPOINT_TYPE $TYPE \
-TEST.ENABLE Truey \
+TEST.ENABLE True \
 AVA.FRAME_DIR $FRAME_DIR \
 AVA.FRAME_LIST_DIR $FRAME_LIST \
 AVA.ANNOTATION_DIR $ANNOT_DIR \

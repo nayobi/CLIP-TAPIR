@@ -81,7 +81,7 @@ MODEL:
   DROPOUT_RATE: 0.5
   MAX_SEQUENCE_LENGTH: 19
 TASKS:
-  TASKS:  ["action_grounding"]
+  TASKS:  ["indeps_grounding"]
   NUM_CLASSES: [16]
   LOSS_FUNC: ["bce_logit"]
   HEAD_ACT:  ["softmax"]

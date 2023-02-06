@@ -126,7 +126,7 @@ def train_epoch(
                         grounding_preds,_ = preds[task][0]
                         grounding_labels = labels[task][0]
                         loss.append(loss_fun(grounding_preds,grounding_labels.long()))
-                    elif task == 'combs_grounding' or task == 'perms_grounding' or task == 'action_grounding':
+                    elif task == 'combs_grounding' or task == 'perms_grounding' or task == 'action_grounding' or task == 'indeps_grounding':
                         loss_fun = losses.get_loss_func(complete_loss_funs[idx])(reduction="mean")
                         grounding_preds,_ = preds[task][0]
                         grounding_labels = labels[task][0]
@@ -316,6 +316,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         # breakpoint()
         # Update and log stats.
         if grounding:
+            # breakpoint()
             grounding_task = complete_tasks[-1]
             gr_names = []
             gr_ids = set([])
@@ -344,13 +345,44 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
                     del preds['grounding_inference']
                     val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
                 else:
-                    grounding_preds = torch.sigmoid(grounding_preds.view(len(inputs[0]),cfg.MODEL.MAX_BBOX_NUM, 7, 16))
-                    grounding_act_preds = torch.max(grounding_preds,dim=2)[0][vis_att_mask==1]
-                    grounding_tool_preds = torch.max(grounding_preds,dim=3)[0][vis_att_mask==1]
-                    preds['tools'] = grounding_tool_preds
-                    preds['actions'] = grounding_act_preds
-                    del preds['grounding_inference']
-                    val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                    if cfg.MODEL.MAX_PROMPTS==112:
+                        grounding_preds = torch.sigmoid(grounding_preds.view(len(inputs[0]),cfg.MODEL.MAX_BBOX_NUM, 7, 16))
+                        grounding_act_preds = torch.max(grounding_preds,dim=2)[0][vis_att_mask==1]
+                        grounding_tool_preds = torch.max(grounding_preds,dim=3)[0][vis_att_mask==1]
+                        preds['tools'] = grounding_tool_preds
+                        preds['actions'] = grounding_act_preds
+                        del preds['grounding_inference']
+                        val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                    elif cfg.MODEL.MAX_PROMPTS==4872:
+                        grounding_preds = torch.argmax(grounding_preds[vis_att_mask==1],dim=-1)
+                        tuple_infos = torch.tensor(meta["prompts_list"])[grounding_preds]
+                        grounding_tool_preds = torch.zeros((len(grounding_preds),8))
+                        grounding_tool_preds[:,tuple_infos[:,0]] = 1
+                        grounding_act_preds = torch.zeros((len(grounding_preds),18))
+                        grounding_act_preds[:,tuple_infos[:,1]] = 1
+                        grounding_act_preds[:,tuple_infos[:,2]] = 1
+                        grounding_act_preds[:,tuple_infos[:,3]] = 1
+                        preds['tools'] = grounding_tool_preds[:,1:]
+                        preds['actions'] = grounding_act_preds[:,1:-1]
+                        del preds['grounding_inference']
+                        val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                    elif cfg.MODEL.MAX_PROMPTS==7:
+                        grounding_preds = softmax(grounding_preds[vis_att_mask==1],dim=-1)
+                        grounding_tool_preds = grounding_preds
+                        grounding_act_preds = torch.ones((len(grounding_preds),16))
+                        preds['tools'] = grounding_tool_preds
+                        preds['actions'] = grounding_act_preds
+                        del preds['grounding_inference']
+                        val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                    elif cfg.MODEL.MAX_PROMPTS==16:
+                        grounding_preds = sigmoid(grounding_preds[vis_att_mask==1])
+                        grounding_act_preds = grounding_preds
+                        grounding_tool_preds = torch.ones((len(grounding_preds),7))
+                        preds['tools'] = grounding_tool_preds
+                        preds['actions'] = grounding_act_preds
+                        del preds['grounding_inference']
+                        val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                        
         
         if any('grounding' not in task for task in complete_tasks):
             val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
@@ -486,7 +518,7 @@ def train(cfg):
     start_epoch = cu.load_train_checkpoint(
         cfg, model, optimizer, scaler if cfg.TRAIN.MIXED_PRECISION else None
     )
-
+    # breakpoint()
     if any('grounding' in task for task in cfg.TASKS.TASKS) and cfg.TRAIN.PRETRAIN in ['cross','full'] and start_epoch==0:
         cu.load_ground_checkpoint(cfg,model)
 

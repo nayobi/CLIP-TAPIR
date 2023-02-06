@@ -98,6 +98,61 @@ def eval_grounding(results,task):
                     else:
                         FP += max(1,len(ious1))
             
+            elif task == 'indeps_grounding':
+                try:
+                    assert len(ground['bboxes'])==len(ground[f'prob_{task}']), f"{ground['bboxes']} & {ground[f'prob_{task}']}"
+
+                    scores = 1/(1 + np.exp(-np.array(ground[f'prob_{task}'])))
+                    gt_box1 = list(map(float,ground['gt'][0]))
+                    gt_box2 = list(map(float,ground['gt'][1]))
+                    gt_box3 = list(map(float,ground['gt'][2]))
+                    gt_box4 = list(map(float,ground['gt'][3]))
+
+                    batch_boxes = np.array(ground['bboxes'])
+                    boxes_iou = np.zeros((len(batch_boxes),4))
+                    
+                    count_real = 0
+                    for gt_id,gt_box in enumerate([gt_box1,gt_box2,gt_box3,gt_box4]):
+                        if gt_box==[0.0,0.0,0.0,0.0]:
+                            boxes_iou[:,gt_id] = -1
+                        else:
+                            count_real += 1
+                            for i in range(len(batch_boxes)):
+                                boxes_iou[i,gt_id] = boxiou(batch_boxes[i],gt_box)
+                    
+                    pred_boxes = boxes_iou[scores>=0.5]
+                    if len(pred_boxes)>0:
+                        pred_boxes = pred_boxes[pred_boxes>-1]
+                        if len(pred_boxes.shape)>1:
+                            indexes = np.argmax(pred_boxes,axis=0)
+                            T += max(count_real,max(*list(pred_boxes.shape)))
+                            true_index = [int(ind) for ind_id,ind in enumerate(indexes) if pred_boxes[int(ind),ind_id]>=0.5]
+                            matches = len(set(true_index))
+                            TP += matches
+                            FP += max(len(pred_boxes[0])-matches, len(pred_boxes)-matches) 
+
+                            # if max(count_real,max(*list(pred_boxes.shape))) != matches + max(len(pred_boxes[0])-matches, len(pred_boxes)-matches):
+                            #     print('ACA')
+                            #     breakpoint()
+                        else:
+                            T += max(count_real,len(pred_boxes))
+                            if max(pred_boxes)>=0.5:
+                                TP += 1
+                                FP += len(pred_boxes) - 1
+                            else:
+                                FP += len(pred_boxes)
+                            
+                            # if max(count_real,len(pred_boxes))!=len(pred_boxes):
+                            #     print('ACO')
+                            #     breakpoint()
+                            
+                    else:
+                        T += count_real
+                        FP += count_real
+                except:
+                    traceback.print_exc()
+                    breakpoint()               
+            
             elif task == 'phrase_grounding':
 
                 scores = np.argmax(np.array(ground[f'prob_{task}']),axis=1)
@@ -180,5 +235,6 @@ def eval_grounding(results,task):
                         else:
                             FP += max(1,len(ious1))
     
-    assert T==(TP+FP), "FP: {FP}, TP: {TP}, T: {T}"
+    assert T==(TP+FP), f"FP: {FP}, TP: {TP}, T: {T}"
+    # print(names,sum_all)
     return TP/T

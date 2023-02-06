@@ -181,7 +181,7 @@ class SurgeryMeter(object):
         self.texts = []
     
     def update_grounding(self, preds, visn_att_mask, ground_bboxes, gt_bboxes, names, texts):
-        # breakpoint()
+
         try:
             for i in range(len(preds)):
                 batch_boxes = ground_bboxes[ground_bboxes[:,0]==i][:,1:].tolist()

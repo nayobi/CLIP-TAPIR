@@ -225,6 +225,7 @@ def load_checkpoint(
     epoch_reset=False,
     clear_name_pattern=(),
     scheduler=None,
+    cfg = None
 ):
     """
     Load the checkpoint from the given file. If inflation is True, inflate the
@@ -252,6 +253,7 @@ def load_checkpoint(
 
     # Account for the DDP wrapper in the multi-gpu setting.
     ms = model.module if data_parallel else model
+    grounding = any('grounding' in x for x in cfg.TASKS.TASKS)
     if convert_from_caffe2:
         with pathmgr.open(path_to_checkpoint, "rb") as f:
             caffe2_checkpoint = pickle.load(f, encoding="latin1")
@@ -358,25 +360,50 @@ def load_checkpoint(
             pre_train_dict = checkpoint["model_state"]
             model_dict = ms.state_dict()
             # Match pre-trained weights that have same shape as current model.
-            pre_train_dict_match = {
-                k: v
-                for k, v in pre_train_dict.items()
-                if k in model_dict and v.size() == model_dict[k].size()
-            }
-            # Weights that do not have match from the pre-trained model.
-            not_load_layers = [
-                k
-                for k in model_dict.keys()
-                if k not in pre_train_dict_match.keys()
-            ]
-            # Log weights that are not loaded with the pre-trained weights.
-            if not_load_layers:
-                for k in not_load_layers:
-                    # if 'cross_encoder' not in k and 'text_encoder' not in k:
-                    logger.info("Network weights {} not loaded.".format(k))
-            # Load pre-trained weights.
-            ms.load_state_dict(pre_train_dict_match, strict=False)
-            epoch = -1
+            if not grounding:
+                pre_train_dict_match = {
+                    k: v
+                    for k, v in pre_train_dict.items()
+                    if k in model_dict and v.size() == model_dict[k].size()
+                }
+                # Weights that do not have match from the pre-trained model.
+                not_load_layers = [
+                    k
+                    for k in model_dict.keys()
+                    if k not in pre_train_dict_match.keys()
+                ]
+                # Log weights that are not loaded with the pre-trained weights.
+                if not_load_layers:
+                    for k in not_load_layers:
+                        # if 'cross_encoder' not in k and 'text_encoder' not in k:
+                        logger.info("Network weights {} not loaded.".format(k))
+                # Load pre-trained weights.
+                ms.load_state_dict(pre_train_dict_match, strict=False)
+                epoch = -1
+            else:
+                grounding_task = [x for x in cfg.TASKS.TASKS if 'grounding' in x][0].lower()
+                pre_train_dict_match = {
+                    k.replace('tools',grounding_task).replace('actions',grounding_task): v
+                    for k, v in pre_train_dict.items()
+                    if k.replace('tools',grounding_task).replace('actions',grounding_task) in model_dict and v.size() == model_dict[k.replace('tools',grounding_task).replace('actions',grounding_task)].size()
+                }
+                # Weights that do not have match from the pre-trained model.
+                not_load_layers = [
+                    k
+                    for k in model_dict.keys()
+                    if k not in pre_train_dict_match.keys()
+                ]
+                # Log weights that are not loaded with the pre-trained weights.
+                if not_load_layers:
+                    for k in not_load_layers:
+                        if cfg.TRAIN.PRETRAIN in ['full','cross']:
+                            if 'cross_encoder' not in k and 'text_encoder' not in k:
+                                logger.info("Network weights {} not loaded.".format(k))
+                        else:
+                            logger.info("Network weights {} not loaded.".format(k))
+                # Load pre-trained weights.
+                ms.load_state_dict(pre_train_dict_match, strict=False)
+                epoch = -1
 
             # Load the optimizer state (commonly not done when fine-tuning)
         if "epoch" in checkpoint.keys() and not epoch_reset:
@@ -608,10 +635,11 @@ def load_test_checkpoint(cfg, model):
             None,
             inflation=False,
             convert_from_caffe2=cfg.TEST.CHECKPOINT_TYPE == "caffe2",
+            cfg=cfg
         )
     elif has_checkpoint(cfg.OUTPUT_DIR):
         last_checkpoint = get_last_checkpoint(cfg.OUTPUT_DIR)
-        load_checkpoint(last_checkpoint, model, cfg.NUM_GPUS > 1)
+        load_checkpoint(last_checkpoint, model, cfg.NUM_GPUS > 1, cfg=cfg)
     elif cfg.TRAIN.CHECKPOINT_FILE_PATH != "":
         # If no checkpoint found in TEST.CHECKPOINT_FILE_PATH or in the current
         # checkpoint folder, try to load checkpoint from
@@ -623,6 +651,7 @@ def load_test_checkpoint(cfg, model):
             None,
             inflation=False,
             convert_from_caffe2=cfg.TRAIN.CHECKPOINT_TYPE == "caffe2",
+            cfg=cfg
         )
     else:
         logger.info(
@@ -638,7 +667,7 @@ def load_train_checkpoint(cfg, model, optimizer, scaler=None):
         last_checkpoint = get_last_checkpoint(cfg.OUTPUT_DIR)
         logger.info("Load from last checkpoint, {}.".format(last_checkpoint))
         checkpoint_epoch = load_checkpoint(
-            last_checkpoint, model, cfg.NUM_GPUS > 1, optimizer, scaler=scaler
+            last_checkpoint, model, cfg.NUM_GPUS > 1, optimizer, scaler=scaler, cfg=cfg
         )
         start_epoch = checkpoint_epoch + 1
     elif cfg.TRAIN.CHECKPOINT_FILE_PATH != "":
@@ -653,6 +682,7 @@ def load_train_checkpoint(cfg, model, optimizer, scaler=None):
             convert_from_caffe2=cfg.TRAIN.CHECKPOINT_TYPE == "caffe2",
             epoch_reset=cfg.TRAIN.CHECKPOINT_EPOCH_RESET,
             clear_name_pattern=cfg.TRAIN.CHECKPOINT_CLEAR_NAME_PATTERN,
+            cfg=cfg
         )
         start_epoch = checkpoint_epoch + 1
     else:

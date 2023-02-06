@@ -171,6 +171,8 @@ class TransformerGroundHead(nn.Module):
         dim_faster = 1024 
         # Feature Vector dimension from deformable detr is 1024
         dim_detr = 256
+        self.trans = False
+        self.deep = cfg.MODEL.DEEP_SUPERVISION
              
         if self.cfg.FASTER.ENABLE:
             self.dim_add = 1024
@@ -183,8 +185,25 @@ class TransformerGroundHead(nn.Module):
         
         if cfg.FASTER.DETR:
             # We redimension deformable detr features to the same as in faster r-cnn
-            self.mlp = nn.Sequential(nn.Linear(dim_detr, dim_faster, bias=False),
-                                    nn.BatchNorm1d(dim_faster))
+            if cfg.MODEL.MLP:
+                self.trans = True
+                self.mlp = nn.Sequential(nn.Linear(dim_detr,768),
+                                         nn.ReLU(),
+                                         nn.Linear(768,768))
+
+                self.transform = nn.Sequential(nn.Linear(768,768),
+                                               nn.ReLU(),
+                                               nn.Linear(768,768))
+                dim_out = 768*2
+            else:
+                self.mlp = nn.Sequential(nn.Linear(dim_detr, dim_faster, bias=False),
+                                         nn.BatchNorm1d(dim_faster))
+            
+            if self.deep:
+                self.deep_trans = nn.Sequential(nn.Linear(768,768),
+                                                nn.ReLU(),
+                                                nn.Linear(768,768))
+
         elif not self.cfg.FASTER.ENABLE:
             self.mlp = nn.Sequential(nn.Linear(768, dim_out, bias=False),
                                     nn.BatchNorm1d(dim_out))
@@ -205,6 +224,12 @@ class TransformerGroundHead(nn.Module):
 
     def forward(self, inputs, bboxes, features=None):
         x = inputs.mean(1)
+        ret_x = x
+        if self.deep:
+            ret_x = self.deep_trans(x)
+        if self.trans:
+            x = self.transform(x)
+        
         x_boxes = torch.zeros(len(bboxes), x.shape[1], device = inputs.device, requires_grad=True)
         # bidx = torch.zeros(len(bboxes), device = inputs.device, requires_grad=False)
         for i in range(len(inputs)):
@@ -247,11 +272,7 @@ class TransformerGroundHead(nn.Module):
         
         vis_output = torch.cat(vis_output,dim=0).view((len(inputs),self.cfg.MODEL.MAX_BBOX_NUM,x.shape[1]))
 
-        # output = torch.zeros((len(inputs),self.cfg.MODEL.MAX_BBOX_NUM,x.shape[1]), device = inputs.device, requires_grad=True)
-        # for i in range(len(inputs)):
-        #     output[i][:len(bboxes[bboxes[:,0] == i])].copy_(x[bboxes[:,0] == i])
-
-        return vis_output,att_mask
+        return vis_output,att_mask,ret_x
 
 
 class TextEncoder(nn.Module):
@@ -306,11 +327,11 @@ class TextEncoder(nn.Module):
         tokens_ids = tokens['input_ids'].cuda()
         att_masks = tokens['attention_mask'].cuda()
 
-        hidden,_ = self.bert(input_ids=tokens_ids, 
+        hidden,cls_token = self.bert(input_ids=tokens_ids, 
                     attention_mask=att_masks,
                     return_dict=False)
         
-        return hidden, att_masks
+        return hidden, att_masks, cls_token
 
 
 class CrossEncoder(nn.Module):
@@ -372,6 +393,7 @@ class CrossEncoder(nn.Module):
 
         for layer_module in self.single_layers:
             visn_feats = layer_module(visn_feats, extended_visual_attention_mask)
+        ret_visn_feats = visn_feats
             
         # cross-modality
         for layer_module in self.cross_layers:
@@ -380,5 +402,5 @@ class CrossEncoder(nn.Module):
         
         pooled_output = self.pooler(lang_feats)
 
-        return lang_feats, visn_feats, pooled_output
+        return lang_feats, visn_feats, pooled_output, ret_visn_feats
         

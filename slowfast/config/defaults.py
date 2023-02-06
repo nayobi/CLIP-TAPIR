@@ -332,6 +332,13 @@ _C.MODEL.BATCH_NORM = False
 
 _C.MODEL.AFFINITY_NORM = False
 
+_C.MODEL.JUST_ACTIONS = False
+
+_C.MODEL.TEMPERATURE = False
+
+_C.MODEL.DEEP_SUPERVISION = False
+
+_C.MODEL.MLP = False
 
 # -----------------------------------------------------------------------------
 # MViT options

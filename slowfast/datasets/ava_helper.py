@@ -129,7 +129,16 @@ def load_boxes_and_labels(cfg, mode):
 
 def load_prompts(cfg):
 
-    filename = os.path.join(cfg.AVA.ANNOTATION_DIR, f'inference_prompts.csv')
+    if cfg.MODEL.MAX_PROMPTS==112:
+        filename = os.path.join(cfg.AVA.ANNOTATION_DIR, f'inference_prompts.csv')
+    elif cfg.MODEL.MAX_PROMPTS==4872:
+        filename = os.path.join(cfg.AVA.ANNOTATION_DIR, f'inference_cubic_prompts.csv')
+    elif cfg.MODEL.MAX_PROMPTS==7:
+        filename = os.path.join(cfg.AVA.ANNOTATION_DIR, f'inference_tool_prompts.csv')
+    elif cfg.MODEL.MAX_PROMPTS==16:
+        filename = os.path.join(cfg.AVA.ANNOTATION_DIR, f'inference_action_prompts.csv')
+    else:
+        breakpoint()
     all_prompts = []
     all_p_labels_dict = {}
     all_p_labels_list = []
@@ -137,9 +146,13 @@ def load_prompts(cfg):
         for l_id,line in enumerate(f):
             prompt,labels = line.strip().split("|")
             all_prompts.append(prompt)
-            tool,act,_,_ = tuple(map(int,labels.replace('(','').replace(')','').split(',')))
-            all_p_labels_dict[(tool,act)] = l_id
-            all_p_labels_list.append((tool,act))
+            tool,act1,act2,act3 = tuple(map(int,labels.replace('(','').replace(')','').split(',')))
+            if cfg.MODEL.MAX_PROMPTS<=112:
+                all_p_labels_dict[(tool,act1)] = l_id
+                all_p_labels_list.append((tool,act1))
+            elif cfg.MODEL.MAX_PROMPTS==4872:
+                all_p_labels_dict[(tool,act1,act2,act3)] = l_id
+                all_p_labels_list.append((tool,act1,act2,act3))
     
     return all_prompts, all_p_labels_dict, all_p_labels_list
 
@@ -200,6 +213,7 @@ def load_negatives(cfg,all_vid_texts):
 
 def load_box_texts(cfg,mode):
 
+    indp = False
     if 'phrase_perms_grounding' in cfg.TASKS.TASKS:
         post_suffix = '_phrase_perms'
         phrase = True
@@ -227,6 +241,11 @@ def load_box_texts(cfg,mode):
     elif 'single_grounding' in cfg.TASKS.TASKS:
         post_suffix = ''
         phrase = False
+
+    elif 'indeps_grounding' in cfg.TASKS.TASKS:
+        post_suffix = '_independent'
+        phrase = False
+        indp = True
 
     else:
         breakpoint()
@@ -289,6 +308,31 @@ def load_box_texts(cfg,mode):
                 except:
                     traceback.print_exc()
                     breakpoint()
+            
+            elif indp:
+                # When we use predicted boxes to train/eval, we need to
+                # save as empty the boxes whose scores are below the threshold.
+                # Box with format [x1, y1, x2, y2] with a range of [0, 1] as float.
+                text = row[5]
+                if cfg.MODEL.JUST_ACTIONS and 'surgical' not in text:
+                    continue
+                box1 = list(map(float, row[3].split(',')))
+                if len(row[4])>2:
+                    if '_' in row[4]:
+                        boxes = row[4].split('_')
+                        boxes2 = [list(map(float,boxes[i].split(','))) if i<len(boxes) else [0,0,0,0] for i in range(3)]
+                    else:
+                        boxes2 = [list(map(float, row[4].split(','))), [0,0,0,0], [0,0,0,0]]
+                else:
+                    boxes2 = [[0,0,0,0]]*3
+                video_name, frame_sec = row[0], int(row[1])
+
+                if video_name not in all_vid_texts:
+                    all_vid_texts[video_name] = {}
+                    for sec in AVA_VALID_FRAMES[video_name]:
+                        all_vid_texts[video_name][sec] = []
+                
+                all_vid_texts[video_name][frame_sec].append([video_name,frame_sec,box1,boxes2,text])
 
             else:
                 # When we use predicted boxes to train/eval, we need to

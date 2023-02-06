@@ -5,6 +5,7 @@
 
 import math
 from functools import partial
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -639,6 +640,8 @@ class MViT(nn.Module):
         pool_size = _POOL1[cfg.MODEL.ARCH]
         pool_size[0][0] = self.patch_stride[0]
         width_per_group = cfg.RESNET.WIDTH_PER_GROUP
+        if cfg.MODEL.TEMPERATURE:
+            self.temp = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         for idx, task in enumerate(self.tasks):
             if task == 'tools' or task == 'actions':
                 extra_head = head_helper.TransformerRoIHead(
@@ -686,6 +689,15 @@ class MViT(nn.Module):
 
             else:
                 self.add_module("extra_heads_{}".format(task), extra_head)
+            
+            self.deep = cfg.MODEL.DEEP_SUPERVISION
+            if self.deep:
+                self.tools_presence = nn.Linear(768,7)
+                self.acts_presence = nn.Linear(768,16)
+                self.tools_class = nn.Linear(768,7)
+                self.acts_class = nn.Linear(768,16)
+                self.lang_tool_class = nn.Linear(768,7)
+                self.lang_act_class = nn.Linear(768,16)
    
         if self.sep_pos_embed:
             trunc_normal_(self.pos_embed_spatial, std=0.02)
@@ -733,7 +745,7 @@ class MViT(nn.Module):
             return {}
 
     def forward(self, x, bboxes=None, features=None, texts=None):
-        
+        # breakpoint()
         out = {k:[] for k in self.tasks}
         x = x[0]
         x = self.patch_embed(x)
@@ -783,27 +795,26 @@ class MViT(nn.Module):
                 extra_head = getattr(self, "extra_heads_{}".format(task))
             # Take the thw features and the instrument detector features and bboxes
             if 'grounding' in task:
-                out_features, vis_att_mask = extra_head(x, bboxes, features)
-                lang_feats, lang_att_mask = self.text_encoder(texts)
+                out_features, vis_att_mask, vis_tokens = extra_head(x, bboxes, features)
+                lang_feats, lang_att_mask, cls_tokens = self.text_encoder(texts)
 
                 if task == 'grounding_inference':
                     afinity_matrixes = []
                     for i in range(len(x)):
                         this_vis_feats = out_features[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1,1)
                         this_att_mask = vis_att_mask[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1)
-                        _,out_vis,lang_cls = self.cross_encoder(lang_feats,
+                        _,out_vis,lang_cls, alter_vis_out = self.cross_encoder(lang_feats,
                                                                 lang_att_mask,
                                                                 this_vis_feats,
                                                                 this_att_mask)
-
                         if self.cfg.MODEL.BATCH_NORM or self.cfg.MODEL.LAYER_NORM:
-                            out_vis = self.vis_norm(out_features)
+                            out_vis = self.vis_norm(out_vis)
                             lang_cls = self.lang_norm(lang_cls)
                         if self.cfg.MODEL.L2_NORM:
-                            out_vis /= out_vis.norm(dim=-1,keep_dim=True)
-                            lang_cls /= lang_cls.norm(dim=-1,keep_dim=True)
-
+                            out_vis = out_vis / out_vis.norm(dim=-1,keepdim=True)
+                            lang_cls = lang_cls / lang_cls.norm(dim=-1,keepdim=True)
                         afinity_matrixes.append(torch.einsum('bij,bj->bi',out_vis,lang_cls))
+                    # breakpoint()
                     affinity_mat = torch.stack(afinity_matrixes,dim=0).permute(0,2,1)
 
                     if self.cfg.MODEL.GROUND_LAYERS_PER_TASK:
@@ -820,7 +831,7 @@ class MViT(nn.Module):
                     elif self.cfg.MODEL.GROUND_LAYERS_PROMPTS_LAYERS:
                         affinity_mat = self.grounding_layer(affinity_mat)
                 else:
-                    out_lang, out_vis, lang_cls = self.cross_encoder(lang_feats, lang_att_mask, out_features, vis_att_mask)
+                    out_lang, out_vis, lang_cls, alter_vis_out = self.cross_encoder(lang_feats, lang_att_mask, out_features, vis_att_mask)
                     if self.cfg.MODEL.BATCH_NORM or self.cfg.MODEL.LAYER_NORM:
                         out_vis = self.vis_norm(out_vis)
                         lang_cls = self.lang_norm(lang_cls)
@@ -835,7 +846,27 @@ class MViT(nn.Module):
 
                 if self.cfg.MODEL.AFFINITY_NORM:
                     affinity_mat = affinity_mat / affinity_mat.norm(dim=-1,keepdim=True)
-                out[task].append((affinity_mat,vis_att_mask))
+                
+                if self.cfg.MODEL.TEMPERATURE:
+                        affinity_mat = affinity_mat * self.temp.exp()
+                
+                if self.deep:
+                    tool_presence_out = self.tools_presence(vis_tokens)
+                    act_presence_out = self.acts_presence(vis_tokens)
+                    tool_class_out = self.tools_class(alter_vis_out)
+                    act_class_out = self.acts_class(alter_vis_out)
+                    lang_tool_out = self.lang_tool_class(cls_tokens)
+                    lang_act_out = self.lang_act_class(cls_tokens)
+
+                    out[task].append(((affinity_mat,
+                                       tool_presence_out,
+                                       act_presence_out,
+                                       tool_class_out,
+                                       act_class_out,
+                                       lang_tool_out,
+                                       lang_act_out),vis_att_mask))
+                else:
+                    out[task].append((affinity_mat,vis_att_mask))
 
             elif task == 'tools' or task == 'actions':
                 if self.cls_embed_on:

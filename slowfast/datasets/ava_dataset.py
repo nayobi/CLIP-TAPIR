@@ -36,6 +36,8 @@ class Ava(torch.utils.data.Dataset):
         self._phrase = any('phrase' in task for task in cfg.TASKS.TASKS)
         self._infere_grounding = 'grounding_inference' in cfg.TASKS.TASKS
         self._negatives = cfg.TRAIN.NEGATIVES > 0
+        self._independent = 'indeps_grounding' in cfg.TASKS.TASKS
+        self._deep = cfg.MODEL.DEEP_SUPERVISION
         # Augmentation params.
         self._data_mean = cfg.DATA.MEAN
         self._data_std = cfg.DATA.STD
@@ -139,6 +141,9 @@ class Ava(torch.utils.data.Dataset):
         Returns:
             (int): the number of videos in the dataset.
         """
+        if self._grounding and not self._infere_grounding:
+            return len(self._all_texts_list)
+        
         return len(self._keyframe_indices)
 
     def _images_and_boxes_preprocessing_cv2(self, imgs, boxes):
@@ -394,7 +399,6 @@ class Ava(torch.utils.data.Dataset):
             extra_data (dict): a dict containing extra data fields, like "boxes",
                 "ori_boxes" and "metadata".
         """
-        # breakpoint()
         if self._grounding and not self._infere_grounding:
             t_video_name, t_frame_sec, item1, item2, text, frame_idx = self._all_texts_list[idx]
             video_idx, sec_idx, sec, center_idx = self._keyframe_indices[frame_idx]
@@ -403,12 +407,15 @@ class Ava(torch.utils.data.Dataset):
             assert sec==t_frame_sec, f"{sec} & {t_frame_sec}"
             if self._phrase:
                 t_boxes,t_idis = item1,item2
+            elif self._independent:
+                t_box1,(t_box2,t_box3,t_box4) = item1, item2
             else:
                 t_box1,t_box2 = item1, item2
         else:
             text = self.all_promts if self._infere_grounding else ''
             video_idx, sec_idx, sec, center_idx = self._keyframe_indices[idx]
             video_name = self._video_idx_to_name[video_idx]
+
         folder_to_images = "/".join(self._image_paths[video_idx][0].split('/')[:-2])
         complete_name = video_name+'/'+str(sec).zfill(5)+'.jpg'
         path_complete_name = os.path.join(folder_to_images,complete_name)
@@ -448,6 +455,8 @@ class Ava(torch.utils.data.Dataset):
                 # all_labels[k] = [[[-1,-1]]*len(t_boxes), t_boxes]
             elif k == 'grounding_inference':
                 all_labels[k] = np.zeros((self.cfg.MODEL.MAX_BBOX_NUM,self.cfg.MODEL.MAX_PROMPTS))
+            elif k == 'indeps_grounding':
+                all_labels[k] = [np.zeros(self.cfg.MODEL.MAX_BBOX_NUM),[t_box1,t_box2,t_box3,t_box4]]
             else:
                 all_labels[k] = np.zeros(len(clip_label_list))
 
@@ -502,7 +511,7 @@ class Ava(torch.utils.data.Dataset):
                         ground_label = b_idx
                         all_labels[task][0] = b_idx
 
-                elif task in ['combs_grounding', 'perms_grounding', 'action_grounding']:
+                elif self._split=='train' and task in ['combs_grounding', 'perms_grounding', 'action_grounding']:
                     if box_labels[0]==t_box1:
                         ground_label = b_idx
                         all_labels[task][0][b_idx] = 1
@@ -525,11 +534,29 @@ class Ava(torch.utils.data.Dataset):
                 
                     elif tuple(box_labels[0]) in all_labels[task][1][1]:
                         ground_label = b_idx
-                        label_box_idx = all_labels[task][1][tuple(box_labels[0])]
+                        label_box_idx = all_labels[task][1][1][tuple(box_labels[0])]
                         all_labels[task][0][label_box_idx,b_idx] = 1
                     
                     else:
                         raise ValueError(f'Bbox {faster_box_key} not found')
+                
+                elif self._split=='train' and task == 'indeps_grounding':
+                    # breakpoint()
+                    if box_labels[0]==t_box1:
+                        ground_label = b_idx
+                        all_labels[task][0][b_idx] = 1
+
+                    if box_labels[0]==t_box2:
+                        ground_label = b_idx
+                        all_labels[task][0][b_idx] = 1
+                    
+                    if box_labels[0]==t_box3:
+                        ground_label = b_idx
+                        all_labels[task][0][b_idx] = 1
+                    
+                    if box_labels[0]==t_box4:
+                        ground_label = b_idx
+                        all_labels[task][0][b_idx] = 1
 
                 elif self._split=='train' and task == 'grounding_inference':
                     acts = box_labels[1]

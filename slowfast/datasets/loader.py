@@ -115,6 +115,10 @@ def detection_collate(batch):
                 collated_labels[key] = [torch.tensor(data),boxes]
             elif key == 'grounding_inference':
                 collated_labels[key] = torch.tensor([d[key] for d in labels])
+            elif key == 'indeps_grounding':
+                data = [d[key][0] for d in labels]
+                boxes = [d[key][1] for d in labels]
+                collated_labels[key] = [torch.tensor(data),np.array(boxes)]
             elif 'grounding' in key:
                 data = [d[key][0] for d in labels]
                 boxes = [d[key][1] for d in labels]
