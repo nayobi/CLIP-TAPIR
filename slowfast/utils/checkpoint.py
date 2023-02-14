@@ -254,6 +254,7 @@ def load_checkpoint(
     # Account for the DDP wrapper in the multi-gpu setting.
     ms = model.module if data_parallel else model
     grounding = any('grounding' in x for x in cfg.TASKS.TASKS)
+    rarp = any('rarp45' in x for x in cfg.TASKS.TASKS)
     if convert_from_caffe2:
         with pathmgr.open(path_to_checkpoint, "rb") as f:
             caffe2_checkpoint = pickle.load(f, encoding="latin1")
@@ -360,7 +361,7 @@ def load_checkpoint(
             pre_train_dict = checkpoint["model_state"]
             model_dict = ms.state_dict()
             # Match pre-trained weights that have same shape as current model.
-            if not grounding:
+            if not grounding and not rarp:
                 pre_train_dict_match = {
                     k: v
                     for k, v in pre_train_dict.items()
@@ -381,12 +382,19 @@ def load_checkpoint(
                 ms.load_state_dict(pre_train_dict_match, strict=False)
                 epoch = -1
             else:
-                grounding_task = [x for x in cfg.TASKS.TASKS if 'grounding' in x][0].lower()
-                pre_train_dict_match = {
-                    k.replace('tools',grounding_task).replace('actions',grounding_task): v
-                    for k, v in pre_train_dict.items()
-                    if k.replace('tools',grounding_task).replace('actions',grounding_task) in model_dict and v.size() == model_dict[k.replace('tools',grounding_task).replace('actions',grounding_task)].size()
-                }
+                grounding_task = ' ' if rarp else [x for x in cfg.TASKS.TASKS if 'grounding' in x][0].lower()
+                if 'inference' in grounding_task:
+                    pre_train_dict_match = {
+                        k: v
+                        for k, v in pre_train_dict.items()
+                        if k in model_dict and v.size() == model_dict[k].size()
+                    }
+                else:
+                    pre_train_dict_match = {
+                        k.replace('tools',grounding_task).replace('actions',grounding_task): v
+                        for k, v in pre_train_dict.items()
+                        if k.replace('tools',grounding_task).replace('actions',grounding_task) in model_dict and v.size() == model_dict[k.replace('tools',grounding_task).replace('actions',grounding_task)].size()
+                    }
                 # Weights that do not have match from the pre-trained model.
                 not_load_layers = [
                     k

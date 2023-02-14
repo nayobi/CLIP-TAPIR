@@ -4,6 +4,7 @@
 """Data loader."""
 
 import itertools
+from random import shuffle
 import traceback
 import numpy as np
 from functools import partial
@@ -42,6 +43,24 @@ def multiple_samples_collate(batch, fold=False):
     else:
         return inputs, labels, video_idx, extra_data
 
+def rarp45_collate(batch):
+    inputs,labels,names,texts = zip(*batch)
+
+    indexes = np.array(range(len(texts)))
+    shuffle(indexes)
+    ret_texts = [texts[i] for i in indexes]
+    new_labels = [labels[i] for i in indexes]
+    ret_labels = np.zeros((len(inputs), len(texts)))
+    # breakpoint()
+    for lab in set(new_labels):
+        im_mask = np.zeros((len(inputs), len(texts)), dtype=bool)
+        t_mask = np.zeros((len(inputs), len(texts)), dtype=bool)
+        l_mask = np.array(new_labels)==lab
+        im_mask[:,l_mask] = 1
+        t_mask[indexes[l_mask],:] = 1
+        ret_labels[im_mask*t_mask] = 1
+
+    return default_collate(inputs),torch.tensor(ret_labels),names,ret_texts
 
 def detection_collate(batch):
     """
@@ -115,7 +134,7 @@ def detection_collate(batch):
                 collated_labels[key] = [torch.tensor(data),boxes]
             elif key == 'grounding_inference':
                 collated_labels[key] = torch.tensor([d[key] for d in labels])
-            elif key == 'indeps_grounding':
+            elif key == 'indeps_grounding' or key=='varis_grounding':
                 data = [d[key][0] for d in labels]
                 boxes = [d[key][1] for d in labels]
                 collated_labels[key] = [torch.tensor(data),np.array(boxes)]
@@ -169,7 +188,7 @@ def construct_loader(cfg, split, is_precise_bn=False):
             num_workers=cfg.DATA_LOADER.NUM_WORKERS,
             pin_memory=cfg.DATA_LOADER.PIN_MEMORY,
             drop_last=drop_last,
-            collate_fn=detection_collate if cfg.DETECTION.ENABLE else None,
+            collate_fn= (rarp45_collate if dataset_name == 'rarp45' else detection_collate) if cfg.DETECTION.ENABLE else None,
             worker_init_fn=utils.loader_worker_init_fn(dataset),
         )
     else:
@@ -196,7 +215,7 @@ def construct_loader(cfg, split, is_precise_bn=False):
             sampler = utils.create_sampler(dataset, shuffle, cfg)
             # Create a loader
             if cfg.DETECTION.ENABLE:
-                collate_func = detection_collate
+                collate_func = rarp45_collate if dataset_name == 'rarp45' else detection_collate 
             elif cfg.AUG.NUM_SAMPLE > 1 and split in ["train"]:
                 collate_func = partial(
                     multiple_samples_collate, fold="imagenet" in dataset_name

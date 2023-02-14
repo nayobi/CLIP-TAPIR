@@ -1,10 +1,10 @@
 # Experiment setup
 FOLD="2" 
 TEXT_ENCODER="biobert"
-TASK="COMBS_GROUND"
+TASK="VARIS_GROUND"
 CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/INSTRUMENTS/checkpoint_best_tools_fold"$FOLD".pyth"  
 LANG_CHECK="/media/SSD0/nayobi/Endovis/MICCAI2023/PNG/model_final.pth"
-EXP_NAME="TAPIR_"$TEXT_ENCODER"_l2_temp"
+EXP_NAME="TAPIR_"$TEXT_ENCODER
 
 #-------------------------
 DATA_VER="psi-ava"
@@ -43,8 +43,7 @@ BN.NUM_BATCHES_PRECISE 72 \
 FASTER.FEATURES_TRAIN $FF_TRAIN \
 FASTER.FEATURES_VAL $FF_VAL \
 TRAIN.PRETRAIN 'cross' \
-MODEL.L2_NORM True \
-MODEL.TEMPERATURE True \
+MODEL.MLP True \
 OUTPUT_DIR $OUTPUT_DIR
 
 # #############################################################################################

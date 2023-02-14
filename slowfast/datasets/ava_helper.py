@@ -214,6 +214,8 @@ def load_negatives(cfg,all_vid_texts):
 def load_box_texts(cfg,mode):
 
     indp = False
+    deep = cfg.MODEL.DEEP_SUPERVISION
+
     if 'phrase_perms_grounding' in cfg.TASKS.TASKS:
         post_suffix = '_phrase_perms'
         phrase = True
@@ -244,6 +246,11 @@ def load_box_texts(cfg,mode):
 
     elif 'indeps_grounding' in cfg.TASKS.TASKS:
         post_suffix = '_independent'
+        phrase = False
+        indp = True
+    
+    elif 'varis_grounding' in cfg.TASKS.TASKS:
+        post_suffix = '_variations'
         phrase = False
         indp = True
 
@@ -316,6 +323,9 @@ def load_box_texts(cfg,mode):
                 text = row[5]
                 if cfg.MODEL.JUST_ACTIONS and 'surgical' not in text:
                     continue
+                if deep:
+                    labels = row[6]
+                    text = (text,tuple(map(int,labels.replace('(','').replace(')','').split(','))))
                 box1 = list(map(float, row[3].split(',')))
                 if len(row[4])>2:
                     if '_' in row[4]:
@@ -342,7 +352,9 @@ def load_box_texts(cfg,mode):
                 box2 = list(map(float, row[4].split(','))) if len(row[4])>2 else [0,0,0,0]
                 video_name, frame_sec = row[0], int(row[1])
                 text = row[5]
-
+                if deep:
+                    labels = row[6]
+                    text = (text,tuple(map(int,labels.replace('(','').replace(')','').split(','))))
                 if video_name not in all_vid_texts:
                     all_vid_texts[video_name] = {}
                     for sec in AVA_VALID_FRAMES[video_name]:

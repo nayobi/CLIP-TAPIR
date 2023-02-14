@@ -1,13 +1,13 @@
 TRAIN:
   ENABLE: True
-  DATASET: ava
-  BATCH_SIZE: 8
+  DATASET: rarp45
+  BATCH_SIZE: 24
   EVAL_PERIOD: 1
   CHECKPOINT_PERIOD: 1
   AUTO_RESUME: True
 DATA:
   NUM_FRAMES: 16
-  SAMPLING_RATE: 1
+  SAMPLING_RATE: 10
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
   TEST_CROP_SIZE: 224
@@ -23,9 +23,8 @@ AVA:
   TEST_PREDICT_BOX_LISTS: ["val_preds.csv"]
   EXCLUSION_FILE: ""
   GROUNDTRUTH_FILE: "val.csv"
-  FULL_TEST_ON_VAL: True
   TRAIN_USE_COLOR_AUGMENTATION: True
-  TRAIN_PCA_JITTER_ONLY: True
+  FULL_TEST_ON_VAL: True
 MVIT:
   ZERO_DECAY_POS_CLS: False
   NUM_HEADS: 1
@@ -36,7 +35,7 @@ MVIT:
   MLP_RATIO: 4.0
   QKV_BIAS: True
   DROPOUT_RATE: 0.0
-  DROPPATH_RATE: 0.4
+  DROPPATH_RATE: 0.2
   NORM: "layernorm"
   MODE: "conv"
   DEPTH: 16
@@ -46,7 +45,7 @@ MVIT:
   POOL_KV_STRIDE_ADAPTIVE: [1, 8, 8]
   POOL_KVQ_KERNEL: [3, 3, 3]
   SEP_POS_EMBED: True
-  CLS_EMBED_ON: True
+  CLS_EMBED_ON: False
   FREEZE_PATCH: False
 DETECTION:
   ENABLE: True
@@ -68,7 +67,7 @@ SOLVER:
   LR_POLICY: cosine
   COSINE_AFTER_WARMUP: True
   COSINE_END_LR: 1e-4
-  MAX_EPOCH: 30
+  MAX_EPOCH: 15
   WARMUP_EPOCHS: 5.0
   MOMENTUM: 0.9
   WEIGHT_DECAY: 1e-8
@@ -80,22 +79,22 @@ MODEL:
   MODEL_NAME: MViT
   LOSS_FUNC: soft_cross_entropy
   DROPOUT_RATE: 0.5
+  MAX_SEQUENCE_LENGTH: 30
 TASKS:
-  TASKS:  ["tools"]
-  NUM_CLASSES: [7]
-  LOSS_FUNC: ["cross_entropy"] 
-  HEAD_ACT:  ["softmax"]
+  TASKS:  ["rarp45_contrastive"]
+  NUM_CLASSES: [11]
+  LOSS_FUNC: ["bce_logit"]
+  HEAD_ACT:  ["sigmoid"]
   LOSS_WEIGHTS:  [1.0]   
 TEST:
-  ENABLE: False
-  DATASET: ava
-  BATCH_SIZE: 18
+  ENABLE: True
+  DATASET: rarp45
+  BATCH_SIZE: 24
 DATA_LOADER:
   NUM_WORKERS: 10
   PIN_MEMORY: True
 FASTER:
-  ENABLE: True
-  DETR: True
+  ENABLE: False
   FEATURES_TRAIN: /home/nfvalderrama/MICCAI2022/data/annotations/basic_anns_faster_features/preds_files/fold1/train/bbox_features.pth
   FEATURES_VAL: /home/nfvalderrama/MICCAI2022/data/annotations/basic_anns_faster_features/preds_files/fold1/val/bbox_features.pth
 NUM_GPUS: 1

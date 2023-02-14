@@ -2,6 +2,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
 from .ava_dataset import Ava  # noqa
+from .rarp45_dataset import Rarp45  # noqa
 from .build import DATASET_REGISTRY, build_dataset  # noqa
 
 try:

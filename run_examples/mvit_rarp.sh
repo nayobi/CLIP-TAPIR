@@ -1,61 +1,53 @@
 # Experiment setup
 FOLD="2" 
 TEXT_ENCODER="biobert"
-TASK="GROUND_INFERE"
-PRETRAIN_TASK="COMBS_GROUND"
-CHECKPOINT="/media/SSD0/nayobi/Endovis/MICCAI2023/TAPIR/outputs/log/"$PRETRAIN_TASK"/TAPIR_"$TEXT_ENCODER"_deep_mlp/Fold2/checkpoint_best_mean.pyth"
-EXP_NAME="TAPIR_"$TEXT_ENCODER"_"$PRETRAIN_TASK"_deep_mlp_per_task"
+TASK="RARP"
+CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/ACTIONS/checkpoint_best_actions_fold"$FOLD".pyth" 
+LANG_CHECK="/media/SSD0/nayobi/Endovis/MICCAI2023/PNG/model_final.pth"
+EXP_NAME="TAPIR_"$TEXT_ENCODER"_RARP"
 
 #-------------------------
 DATA_VER="psi-ava"
-EXPERIMENT_NAME=$EXP_NAME"/Fold"$FOLD
+EXPERIMENT_NAME=$EXP_NAME
 CONFIG_PATH="configs/MVIT_"$TASK".yaml"
 MAP_FILE="surgery_"$TASK"_list.pbtxt"
-FRAME_DIR="outputs/PSIAVA/keyframes/" # Path to the organized keyframes
+FRAME_DIR="/media/SSD1/nayobi/All_datasets/RARP-45_train/train" # Path to the organized keyframes
 OUTPUT_DIR="outputs/log/"$TASK"/"$EXPERIMENT_NAME
-FRAME_LIST="outputs/data_annotations/"$DATA_VER"/fold"$FOLD"/frame_lists"
-ANNOT_DIR="outputs/data_annotations/"$DATA_VER"/fold"$FOLD"/annotations"
-COCO_ANN_PATH="outputs/data_annotations/"$DATA_VER"/fold"$FOLD"/coco_anns/val_coco_anns_v3_35s.json"
-FF_TRAIN="outputs/data_annotations/"$DATA_VER"/fold"$FOLD"/train/bbox_features.pth" # Path to the intrument bounding boxes and features in the training set
-FF_VAL="outputs/data_annotations/"$DATA_VER"/fold"$FOLD"/val/bbox_features.pth" # Path to the intrument bounding boxes and features in the validating set
-
+FRAME_LIST="/media/SSD1/nayobi/All_datasets/RARP-45_train/frames"
+ANNOT_DIR="/media/SSD1/nayobi/All_datasets/RARP-45_train/annots"
+COCO_ANN_PATH="/media/SSD1/nayobi/All_datasets/RARP-45_train/rarp45_coco_psiava_annotations.json"
 TYPE="pytorch"
 #-------------------------
 # Run experiment
 
 mkdir -p $OUTPUT_DIR
 
-CUDA_VISIBLE_DEVICES=2 python tools/run_net.py \
+CUDA_VISIBLE_DEVICES=0 python tools/run_net.py \
 --cfg $CONFIG_PATH \
 NUM_GPUS 1 \
 MODEL.TEXT_ENCODER $TEXT_ENCODER \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
+TRAIN.LANG_CHECKPOINT $LANG_CHECK \
 TRAIN.CHECKPOINT_EPOCH_RESET True \
 TRAIN.CHECKPOINT_TYPE $TYPE \
 TEST.ENABLE False \
-TRAIN.PRETRAIN_TASK $PRETRAIN_TASK \
 AVA.FRAME_DIR $FRAME_DIR \
 AVA.FRAME_LIST_DIR $FRAME_LIST \
 AVA.ANNOTATION_DIR $ANNOT_DIR \
 AVA.LABEL_MAP_FILE $MAP_FILE \
 AVA.COCO_ANN_DIR $COCO_ANN_PATH \
 BN.NUM_BATCHES_PRECISE 72 \
-FASTER.FEATURES_TRAIN $FF_TRAIN \
-FASTER.FEATURES_VAL $FF_VAL \
-MODEL.GROUND_LAYERS_PER_TASK True \
-MODEL.MLP True \
-MODEL.DEEP_SUPERVISION True \
-OUTPUT_DIR $OUTPUT_DIR 
+OUTPUT_DIR $OUTPUT_DIR
 
-# ##############################################################################################
+# #################################################################################################33
 
 # # Experiment setup
-# FOLD="2" 
+# FOLD="2" # Fold of the cross-validation split.
 # TEXT_ENCODER="biobert"
-# TASK="GROUND_INFERE"
-# PRETRAIN_TASK="INDEPS_GROUND"
-# CHECKPOINT="/media/SSD0/nayobi/Endovis/MICCAI2023/TAPIR/outputs/log/"$PRETRAIN_TASK"/TAPIR_"$TEXT_ENCODER"_l2/Fold2/checkpoint_best_mean.pyth"
-# EXP_NAME="TAPIR_"$TEXT_ENCODER"_"$PRETRAIN_TASK"_l2"
+# TASK="COMBS_GROUND" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
+# CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/INSTRUMENTS/checkpoint_best_tools_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
+# LANG_CHECK="/media/SSD0/nayobi/Endovis/MICCAI2023/PNG/model_final.pth"
+# EXP_NAME="TAPIR_"$TEXT_ENCODER"_l2"
 
 # #-------------------------
 # DATA_VER="psi-ava"
@@ -76,15 +68,15 @@ OUTPUT_DIR $OUTPUT_DIR
 
 # mkdir -p $OUTPUT_DIR
 
-# CUDA_VISIBLE_DEVICES=2 python tools/run_net.py \
+# CUDA_VISIBLE_DEVICES=0 python tools/run_net.py \
 # --cfg $CONFIG_PATH \
 # NUM_GPUS 1 \
 # MODEL.TEXT_ENCODER $TEXT_ENCODER \
 # TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
+# TRAIN.LANG_CHECKPOINT $LANG_CHECK \
 # TRAIN.CHECKPOINT_EPOCH_RESET True \
 # TRAIN.CHECKPOINT_TYPE $TYPE \
-# TEST.ENABLE True \
-# TRAIN.PRETRAIN_TASK $PRETRAIN_TASK \
+# TEST.ENABLE False \
 # AVA.FRAME_DIR $FRAME_DIR \
 # AVA.FRAME_LIST_DIR $FRAME_LIST \
 # AVA.ANNOTATION_DIR $ANNOT_DIR \
@@ -94,17 +86,18 @@ OUTPUT_DIR $OUTPUT_DIR
 # FASTER.FEATURES_TRAIN $FF_TRAIN \
 # FASTER.FEATURES_VAL $FF_VAL \
 # MODEL.L2_NORM True \
+# TRAIN.PRETRAIN 'cross' \
 # OUTPUT_DIR $OUTPUT_DIR 
 
-# ##############################################################################################
+# #################################################################################################33
 
 # # Experiment setup
-# FOLD="2" 
+# FOLD="2" # Fold of the cross-validation split.
 # TEXT_ENCODER="biobert"
-# TASK="GROUND_INFERE"
-# PRETRAIN_TASK="PERMS_GROUND"
-# CHECKPOINT="/media/SSD0/nayobi/Endovis/MICCAI2023/TAPIR/outputs/log/"$PRETRAIN_TASK"/TAPIR_"$TEXT_ENCODER"_layernorm/Fold2/checkpoint_best_mean.pyth"
-# EXP_NAME="TAPIR_"$TEXT_ENCODER"_"$PRETRAIN_TASK"_layernorm"
+# TASK="PHRASE_PERMS_GROUND" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
+# CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/INSTRUMENTS/checkpoint_best_tools_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
+# LANG_CHECK="/media/SSD0/nayobi/Endovis/MICCAI2023/PNG/model_final.pth"
+# EXP_NAME="TAPIR_"$TEXT_ENCODER
 
 # #-------------------------
 # DATA_VER="psi-ava"
@@ -125,15 +118,15 @@ OUTPUT_DIR $OUTPUT_DIR
 
 # mkdir -p $OUTPUT_DIR
 
-# CUDA_VISIBLE_DEVICES=2 python tools/run_net.py \
+# CUDA_VISIBLE_DEVICES=0 python tools/run_net.py \
 # --cfg $CONFIG_PATH \
 # NUM_GPUS 1 \
 # MODEL.TEXT_ENCODER $TEXT_ENCODER \
 # TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \
+# TRAIN.LANG_CHECKPOINT $LANG_CHECK \
 # TRAIN.CHECKPOINT_EPOCH_RESET True \
 # TRAIN.CHECKPOINT_TYPE $TYPE \
-# TEST.ENABLE True \
-# TRAIN.PRETRAIN_TASK $PRETRAIN_TASK \
+# TEST.ENABLE False \
 # AVA.FRAME_DIR $FRAME_DIR \
 # AVA.FRAME_LIST_DIR $FRAME_LIST \
 # AVA.ANNOTATION_DIR $ANNOT_DIR \
@@ -142,5 +135,5 @@ OUTPUT_DIR $OUTPUT_DIR
 # BN.NUM_BATCHES_PRECISE 72 \
 # FASTER.FEATURES_TRAIN $FF_TRAIN \
 # FASTER.FEATURES_VAL $FF_VAL \
-# MODEL.LAYER_NORM True \
+# TRAIN.PRETRAIN 'cross' \
 # OUTPUT_DIR $OUTPUT_DIR 

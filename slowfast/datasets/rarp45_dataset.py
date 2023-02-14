@@ -3,12 +3,17 @@
 
 from bdb import Breakpoint
 import os
+import random
 import torch
 import logging
 import numpy as np
+import traceback
+import json
+import math
+from tqdm import tqdm
 
 from copy import deepcopy
-from . import ava_helper as ava_helper
+from . import rarp45_helper as ava_helper
 from . import cv2_transform as cv2_transform
 from . import transform as transform
 from . import utils as utils
@@ -18,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 
 @DATASET_REGISTRY.register()
-class Ava(torch.utils.data.Dataset):
+class Rarp45(torch.utils.data.Dataset):
     """
-    We adapt the AVA Dataset management in Slowfast to manage PSI-AVA database.
+    RARP45 Dataset
     """
 
     def __init__(self, cfg, split):
@@ -31,13 +36,6 @@ class Ava(torch.utils.data.Dataset):
         self._seq_len = self._video_length * self._sample_rate
         self._num_classes = {key: n_class for key, n_class in \
                             zip(cfg.TASKS.TASKS, cfg.TASKS.NUM_CLASSES)}
-
-        self._grounding = any('grounding' in task for task in cfg.TASKS.TASKS)
-        self._phrase = any('phrase' in task for task in cfg.TASKS.TASKS)
-        self._infere_grounding = 'grounding_inference' in cfg.TASKS.TASKS
-        self._negatives = cfg.TRAIN.NEGATIVES > 0
-        self._independent = 'indeps_grounding' in cfg.TASKS.TASKS or 'varis_grounding'
-        self._deep = cfg.MODEL.DEEP_SUPERVISION
         # Augmentation params.
         self._data_mean = cfg.DATA.MEAN
         self._data_std = cfg.DATA.STD
@@ -60,7 +58,7 @@ class Ava(torch.utils.data.Dataset):
             self.feature_boxes = ava_helper.load_features_boxes(cfg)
         else: 
             self.features_boxes = None
-        # breakpoint()
+        
         self._load_data(cfg)
 
     def _load_data(self, cfg):
@@ -71,6 +69,7 @@ class Ava(torch.utils.data.Dataset):
             cfg (CfgNode): config
         """
         # Loading frame paths.
+        # breakpoint()
         (
             self._image_paths,
             self._video_idx_to_name,
@@ -81,24 +80,7 @@ class Ava(torch.utils.data.Dataset):
             cfg, mode=self._split
         )
 
-        if self._grounding and not self._infere_grounding:
-            all_vid_texts = ava_helper.load_box_texts(cfg,mode=self._split)
-            if self._split=='train' and self._negatives:
-                all_vid_texts = ava_helper.load_negatives(cfg,all_vid_texts)
-            assert len(boxes_and_labels) == len(self._image_paths) == len(all_vid_texts), f"{len(boxes_and_labels)}, {len(self._image_paths)}, {len(all_vid_texts)}"
-        
-            all_vid_texts = [
-                all_vid_texts[self._video_idx_to_name[i]]
-                for i in range(len(self._image_paths))
-                ]
-        else:
-            all_vid_texts = None
-        if self._infere_grounding:
-            all_vid_texts = None
-            self.all_promts, self.all_p_labels_dict, self.all_p_labels_list = ava_helper.load_prompts(cfg)
-
-        assert len(boxes_and_labels) == len(self._image_paths), f"{len(boxes_and_labels)}, {len(self._image_paths)}"
-
+        assert len(boxes_and_labels) == len(self._image_paths), '{} & {}'.format(len(boxes_and_labels),len(self._image_paths))
         boxes_and_labels = [
             boxes_and_labels[self._video_idx_to_name[i]]
             for i in range(len(self._image_paths))
@@ -108,17 +90,24 @@ class Ava(torch.utils.data.Dataset):
         (
             self._keyframe_indices,
             self._keyframe_boxes_and_labels,
-            self._all_texts_list
-        ) = ava_helper.get_keyframe_data(boxes_and_labels,all_vid_texts)
+        ) = ava_helper.get_keyframe_data(boxes_and_labels)
         # Calculate the number of used boxes.
         self._num_boxes_used = ava_helper.get_num_boxes_used(
             self._keyframe_indices, self._keyframe_boxes_and_labels
         )
+        
+        with open('outputs/data_annotations/RARP45_variations.json','r') as f:
+            varionts_dict = json.load(f)
+            self.variations = varionts_dict['actions_dict']
+            self.prefixes = varionts_dict['prefixs']
+            self.suffixs = varionts_dict['suffixs']
+            self.tool_prefix = varionts_dict['tool_prefix']
+            self.prompts = varionts_dict['infere_prompts']
 
         self.print_summary()
 
     def print_summary(self):
-        logger.info("=== PSI-AVA dataset summary ===")
+        logger.info("=== RARP45 dataset summary ===")
         logger.info("Split: {}".format(self._split))
         logger.info("Number of videos: {}".format(len(self._image_paths)))
         total_frames = sum(
@@ -127,6 +116,24 @@ class Ava(torch.utils.data.Dataset):
         logger.info("Number of frames: {}".format(total_frames))
         logger.info("Number of key frames: {}".format(len(self)))
         logger.info("Number of boxes: {}.".format(self._num_boxes_used))
+    
+    def variate_text(self,text_id):
+        # breakpoint()
+        possible_texts = self.variations[text_id]
+        actual_text = random.choice(possible_texts)
+        modify = bool(random.getrandbits(1))
+        if modify:
+            suffix = bool(random.getrandbits(1))
+            if suffix:
+                actual_text += random.choice(self.suffixs)
+            elif actual_text[0]=='A' or  actual_text[:4]=='Some':
+                actual_text = actual_text.replace(' is ',' ' + random.choice(self.tool_prefix) + ' ')
+            elif actual_text[:3] == 'The':
+                actual_text = random.choice(self.prefixes).replace(' of',' where') + ' ' + actual_text.lower()
+            else:
+                actual_text = random.choice(self.prefixes) + ' ' + actual_text.lower()
+        return actual_text
+
 
     def __len__(self):
         """
@@ -141,9 +148,6 @@ class Ava(torch.utils.data.Dataset):
         Returns:
             (int): the number of videos in the dataset.
         """
-        if self._grounding and not self._infere_grounding:
-            return len(self._all_texts_list)
-        
         return len(self._keyframe_indices)
 
     def _images_and_boxes_preprocessing_cv2(self, imgs, boxes):
@@ -159,7 +163,7 @@ class Ava(torch.utils.data.Dataset):
             imgs (tensor): list of preprocessed images.
             boxes (ndarray): preprocessed boxes.
         """
-
+        # breakpoint()
         height, width, _ = imgs[0].shape
 
         boxes[:, [0, 2]] *= width
@@ -399,54 +403,23 @@ class Ava(torch.utils.data.Dataset):
             extra_data (dict): a dict containing extra data fields, like "boxes",
                 "ori_boxes" and "metadata".
         """
-        if self._grounding and not self._infere_grounding:
-            t_video_name, t_frame_sec, item1, item2, text, frame_idx = self._all_texts_list[idx]
-            if self._deep:
-                text,text_labels = text
-                tool_presence = np.zeros(7)
-                act_presence = np.zeros(17)
-                tool_class = np.zeros((self.cfg.MODEL.MAX_BBOX_NUM))
-                tool_class -= 1
-                act_class = np.zeros((self.cfg.MODEL.MAX_BBOX_NUM,17))
-                lang_tool = text_labels[0]-1
-                lang_acts = np.zeros(17)
-                lang_acts[text_labels[1]] = 1
-                lang_acts[text_labels[2]] = 1
-                lang_acts[text_labels[3]] = 1
-                lang_acts = lang_acts[:-1]
+        # breakpoint()
+        video_idx, sec_idx, sec, center_idx = self._keyframe_indices[idx]
+        video_name = self._video_idx_to_name[video_idx]
+        # TODO Verificar los indices del path
+        folder_to_images = "/".join(self._image_paths[video_idx][0].split('/')[:-4])
 
-            video_idx, sec_idx, sec, center_idx = self._keyframe_indices[frame_idx]
-            video_name = self._video_idx_to_name[video_idx]
-            assert t_video_name==video_name, f"{t_video_name} & {video_name}"
-            assert sec==t_frame_sec, f"{sec} & {t_frame_sec}"
-            if self._phrase:
-                t_boxes,t_idis = item1,item2
-            elif self._independent:
-                t_box1,(t_box2,t_box3,t_box4) = item1, item2
-            else:
-                t_box1,t_box2 = item1, item2
-        else:
-            if self._infere_grounding and self._deep:
-                tool_presence = np.zeros(7)
-                act_presence = np.zeros(17)
-                tool_class = np.zeros((self.cfg.MODEL.MAX_BBOX_NUM))
-                tool_class -= 1
-                act_class = np.zeros((self.cfg.MODEL.MAX_BBOX_NUM,17))
-                lang_tool = np.zeros(self.cfg.MODEL.MAX_PROMPTS)
-                lang_acts = np.zeros((self.cfg.MODEL.MAX_PROMPTS,16))
-                for tid,tup in enumerate(self.all_p_labels_list):
-                    lang_tool[tup[0]-1]=1
-                    lang_acts[tid,tup[1]-1]= 1
-
-            text = self.all_promts if self._infere_grounding else ''
-            video_idx, sec_idx, sec, center_idx = self._keyframe_indices[idx]
-            video_name = self._video_idx_to_name[video_idx]
-
-        folder_to_images = "/".join(self._image_paths[video_idx][0].split('/')[:-2])
-        complete_name = video_name+'/'+str(sec).zfill(5)+'.jpg'
+        #AYOBI TODO cambiar como se están llamando los paths
+        complete_name = video_name+'/DVC/frames/'+str(sec).zfill(9)+'.png'
         path_complete_name = os.path.join(folder_to_images,complete_name)
-        center_idx = self._image_paths[video_idx].index(path_complete_name)
-
+        assert path_complete_name==self._image_paths[video_idx][int(sec/6)], complete_name + ' & ' + self._image_paths[video_idx][sec]
+        try:
+            center_idx = self._image_paths[video_idx].index(path_complete_name)
+            assert center_idx==sec/6
+        except:
+            traceback.print_exc()
+            print(path_complete_name)
+            breakpoint()
 
         # Get the frame idxs for current clip.
         seq = utils.get_sequence(
@@ -455,188 +428,25 @@ class Ava(torch.utils.data.Dataset):
             self._sample_rate,
             num_frames=len(self._image_paths[video_idx]),
         )
+
         clip_label_list = deepcopy(self._keyframe_boxes_and_labels[video_idx][sec_idx])
-        assert len(clip_label_list) > 0
+        if len(clip_label_list) == 0:
+            print(complete_name)
+        assert len(clip_label_list) == 1, clip_label_list
 
-        # Get boxes and labels for current clip.
-        boxes = []
-        labels = []
-
-        # Tasks to solve in training.
-        all_tasks = self.cfg.TASKS.TASKS
-        
-        # Add labels depending on the task
-        all_labels = {}
-        for k in all_tasks:
-            if k == 'single_grounding':
-                all_labels[k] = [-1,t_box1]
-            elif k == 'combs_grounding' or k == 'perms_grounding' or k == 'action_grounding':
-                all_labels[k] = [np.zeros(self.cfg.MODEL.MAX_BBOX_NUM),[t_box1,t_box2]]
-            elif k == 'phrase_grounding':
-                all_labels[k] = [np.zeros((self.cfg.MODEL.MAX_BBOX_NUM,self.cfg.MODEL.MAX_BBOX_NUM)), t_boxes]
-            elif k == 'phrase_combs_grounding' or k == 'phrase_perms_grounding':
-                all_labels[k] = [np.zeros((self.cfg.MODEL.MAX_BBOX_NUM,self.cfg.MODEL.MAX_BBOX_NUM)), t_boxes]
-            elif k == 'grounding_inference':
-                all_labels[k] = np.zeros((self.cfg.MODEL.MAX_BBOX_NUM,self.cfg.MODEL.MAX_PROMPTS))
-            elif k == 'indeps_grounding' or k=='varis_grounding':
-                all_labels[k] = [np.zeros(self.cfg.MODEL.MAX_BBOX_NUM),[t_box1,t_box2,t_box3,t_box4]]
-            else:
-                all_labels[k] = np.zeros(len(clip_label_list))
-
-        keep_box = [True]*len(clip_label_list)
-        
-        if self.cfg.FASTER.ENABLE:
-            faster_features = []
-            # Get all the possible boxes that correspond to the current video frame. 
-            try:
-                box_features = [x for x in self.feature_boxes if x['file_name'] == complete_name][0]['bboxes']
-            except:
-                print(complete_name, 'prediction not found in feature boxes file')
-        else:
-            faster_features = None
-        
-        ground_label = -1
-        for b_idx, box_labels in enumerate(clip_label_list):
-            if len(box_labels[0]) == 0:
-                # Consider this for the recognition tasks.
-                # Create box of the image size
-                box_labels[0] = [0.0, 0.0, 1.0, 1.0]
-                # No atomic action
-                box_labels[1] = [-1]
-                keep_box[b_idx] = False
-
-            boxes.append(box_labels[0])
-            labels.append(box_labels[1])
-            faster_box_key = " ".join(map(str,box_labels[0]))
-            if self.cfg.FASTER.ENABLE:
-                if faster_box_key not in box_features[0].keys() and not box_labels[0] == [0.0, 0.0, 1.0, 1.0]:
-                    breakpoint()
-                try:
-                    if isinstance(box_features[0][faster_box_key], list):
-                        box_features[0][faster_box_key] = torch.tensor(box_features[0][faster_box_key])
-                    faster_features.append([box_features[0][faster_box_key].cpu().detach().numpy()])
-                except KeyError:
-                    # If there are no predictions for that frame, we add a vector of zeros.
-                    faster_features.append([np.zeros(256)])
-                    # logger.info(f"=== No box features found for frame {path_complete_name} ===")
-                except:
-                    breakpoint()
-            if self._deep:
-                tool_presence[box_labels[2][0]]=1
-                act_presence[box_labels[1]]=1
-                tool_class[b_idx] = box_labels[2][0]
-                act_class[b_idx,box_labels[1]]=1
-
-            for task in self.cfg.TASKS.TASKS:
-                if task == 'phases':
-                    all_labels[task][b_idx] = box_labels[3][1]
-                elif task == 'steps':
-                    all_labels[task][b_idx] = box_labels[3][0]
-                elif task == 'tools':
-                    all_labels[task][b_idx] = box_labels[2][0]
-                elif task == 'single_grounding':
-                    if box_labels[0]==t_box1:
-                        ground_label = b_idx
-                        all_labels[task][0] = b_idx
-
-                elif self._split=='train' and task in ['combs_grounding', 'perms_grounding', 'action_grounding']:
-                    if box_labels[0]==t_box1:
-                        ground_label = b_idx
-                        all_labels[task][0][b_idx] = 1
-
-                    if box_labels[0]==t_box2:
-                        ground_label = b_idx
-                        all_labels[task][0][b_idx] = 1
-                
-                elif task == 'phrase_grounding' and self._split=='train':
-                    ground_label = b_idx
-                    label_box_idx = all_labels[task][1][0][tuple(box_labels[0])]
-                    all_labels[task][0][label_box_idx,b_idx] = 1
-                
-                elif self._split=='train' and (task in ['phrase_combs_grounding','phrase_perms_grounding']):
-
-                    if tuple(box_labels[0]) in all_labels[task][1][0]:
-                        ground_label = b_idx
-                        label_box_idx = all_labels[task][1][0][tuple(box_labels[0])]
-                        all_labels[task][0][label_box_idx,b_idx] = 1
-                
-                    elif tuple(box_labels[0]) in all_labels[task][1][1]:
-                        ground_label = b_idx
-                        label_box_idx = all_labels[task][1][1][tuple(box_labels[0])]
-                        all_labels[task][0][label_box_idx,b_idx] = 1
-                    
-                    else:
-                        raise ValueError(f'Bbox {faster_box_key} not found')
-                
-                elif self._split=='train' and task in ['indeps_grounding','varis_grounding']:
-                    # breakpoint()
-                    if box_labels[0]==t_box1:
-                        ground_label = b_idx
-                        all_labels[task][0][b_idx] = 1
-
-                    if box_labels[0]==t_box2:
-                        ground_label = b_idx
-                        all_labels[task][0][b_idx] = 1
-                    
-                    if box_labels[0]==t_box3:
-                        ground_label = b_idx
-                        all_labels[task][0][b_idx] = 1
-                    
-                    if box_labels[0]==t_box4:
-                        ground_label = b_idx
-                        all_labels[task][0][b_idx] = 1
-
-                elif self._split=='train' and task == 'grounding_inference':
-                    if self.cfg.MODEL.MAX_PROMPTS==112:
-                        acts = box_labels[1]
-                        tool = box_labels[2][0]
-                        for act in acts:
-                            if act>-1:
-                                ground_label = 1
-                                label_box_idx = self.all_p_labels_dict[(tool+1,act)]
-                                all_labels[task][b_idx,label_box_idx] = 1
-                    elif self.cfg.MODEL.MAX_PROMPTS==16:
-                        acts = box_labels[1]
-                        for act in acts:
-                            if act>-1:
-                                ground_label = 1
-                                label_box_idx = self.all_p_labels_dict[(-1,act)]
-                                all_labels[task][b_idx,label_box_idx] = 1
-        if self._grounding:
-            assert (self._split=='train' and ground_label>-1) or (self._split=='train' and self._negatives) or self._split=='val', f"There's no match for boxes {t_box1} & {t_box2}"
-        # Construct label arrays. Modifications for including the 3 different actions
-        if 'actions' in self.cfg.TASKS.TASKS:
-            final_labels = np.zeros((len(labels), self._num_classes['actions']), dtype=np.int32)
-            for i, box_labels in enumerate(labels):
-                
-                # AVA label index starts from 1.
-                for label in box_labels:
-                    if label == -1:
-                        continue
-                    
-                    assert label >= 1 and label <= self._num_classes['actions'], print(label)
-                    final_labels[i][label-1] = 1
-
-            all_labels['actions'] = final_labels
-                                     
-        boxes = np.array(boxes)
-        if self.cfg.FASTER.ENABLE:
-            faster_features = np.array(faster_features).squeeze()
-            if len(faster_features.shape) == 1:
-                faster_features = np.expand_dims(faster_features, axis=0)
-            
+        this_label = int(clip_label_list[0][1])
+        text = self.variate_text(str(this_label)) if self._split=='train' else self.prompts
+       
         # Score is not used.
-        boxes = boxes[:, :4].copy()
-        ori_boxes = boxes.copy()
-        metadata = [[video_idx, sec ]] * len(boxes)
-        all_names = [[complete_name]] * len(boxes)
+        boxes = np.zeros((2,4))
+        boxes[:,2:] = 1
         
         # Load images of current clip.
         image_paths = [self._image_paths[video_idx][frame] for frame in seq]
         imgs = utils.retry_load_images(
             image_paths, backend=self.cfg.AVA.IMG_PROC_BACKEND
         )
-        
+
         if self.cfg.AVA.IMG_PROC_BACKEND == "pytorch":
             # T H W C -> T C H W.
             imgs = imgs.permute(0, 3, 1, 2)
@@ -654,30 +464,4 @@ class Ava(torch.utils.data.Dataset):
         
         imgs = utils.pack_pathway_output(self.cfg, imgs)
 
-        extra_data = {
-            "boxes": boxes,
-            "ori_boxes": ori_boxes,
-            "metadata": metadata,
-            "img_names": all_names,
-            "keep_box": keep_box
-        }
-            
-        if self.cfg.FASTER.ENABLE:
-            extra_data["faster_features"] = faster_features
-        if self._phrase:
-            token_ids_mat = np.zeros((self.cfg.MODEL.MAX_SEQUENCE_LENGTH, self.cfg.MODEL.MAX_BBOX_NUM))
-            t_idis = np.array([-3]+t_idis+[-3]+([-1]*(self.cfg.MODEL.MAX_SEQUENCE_LENGTH-(len(t_idis)+2))))
-            token_ids_mat[t_idis>-1,t_idis[t_idis>-1]]=1
-            extra_data["token_ids"] = token_ids_mat
-        if self._infere_grounding:
-            extra_data["prompts_dict"] = self.all_p_labels_dict
-            extra_data["prompts_list"] = self.all_p_labels_list
-        if self._deep:
-            extra_data["tool_presence"] = tool_presence
-            extra_data["act_presence"] = act_presence[:-1]
-            extra_data["tool_class"] = tool_class
-            extra_data["act_class"] = act_class[:,:-1]
-            extra_data["lang_tool"] = lang_tool
-            extra_data["lang_act"] = lang_acts
-        
-        return imgs, all_labels, idx, extra_data, text
+        return imgs, this_label, complete_name, text

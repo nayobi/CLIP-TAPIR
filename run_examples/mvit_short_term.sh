@@ -1,8 +1,11 @@
 # Experiment setup
 FOLD="2" # Fold of the cross-validation split.
 EXP_NAME="TAPIR_Intruments"
-TASK="ACTIONS" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
-CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/ACTIONS/checkpoint_best_actions_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
+# TASK="ACTIONS" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
+# CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/ACTIONS/checkpoint_best_actions_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
+TASK="TOOLS" # Short term tasks "TOOLS" for the instrument detection task or "ACTIONS" for the atomic action recognition task
+CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/TOOLS/checkpoint_best_tools_fold"$FOLD".pyth"  # Path to the model weights of the pretrained model
+
 
 #-------------------------
 DATA_VER="psi-ava"
@@ -23,7 +26,7 @@ TYPE="pytorch"
 
 mkdir -p $OUTPUT_DIR
 
-CUDA_VISIBLE_DEVICES=1 python tools/run_net.py \
+CUDA_VISIBLE_DEVICES=0 python tools/run_net.py \
 --cfg $CONFIG_PATH \
 NUM_GPUS 1 \
 TRAIN.CHECKPOINT_FILE_PATH $CHECKPOINT \

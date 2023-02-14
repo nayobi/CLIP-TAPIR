@@ -98,7 +98,7 @@ def eval_grounding(results,task):
                     else:
                         FP += max(1,len(ious1))
             
-            elif task == 'indeps_grounding':
+            elif task == 'indeps_grounding' or task == 'varis_grounding':
                 try:
                     assert len(ground['bboxes'])==len(ground[f'prob_{task}']), f"{ground['bboxes']} & {ground[f'prob_{task}']}"
 

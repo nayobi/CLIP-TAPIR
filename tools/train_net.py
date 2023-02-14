@@ -4,6 +4,7 @@
 """Train a video classification model."""
 
 from genericpath import exists
+import random
 import numpy as np
 import shutil
 import os
@@ -24,7 +25,9 @@ from slowfast.utils.meters import EpochTimer, SurgeryMeter
 from slowfast.utils.multigrid import MultigridSchedule
 from torch.nn.modules.distance import PairwiseDistance
 from torch.nn.functional import softmax, sigmoid
-from torch.nn import  BCEWithLogitsLoss
+from torch.nn import  BCEWithLogitsLoss, CrossEntropyLoss
+from train_rarp import train_epoch as train_rarp
+from train_rarp import eval_epoch as eval_rarp
 
 logger = logging.get_logger(__name__)
 
@@ -57,6 +60,14 @@ def train_epoch(
     complete_tasks = cfg.TASKS.TASKS
     complete_loss_funs = cfg.TASKS.LOSS_FUNC
     infere_grounding = 'grounding_inference' in complete_tasks
+    deep = cfg.MODEL.DEEP_SUPERVISION
+    if deep:
+        tool_pres_loss = BCEWithLogitsLoss()
+        act_pres_loss = BCEWithLogitsLoss()
+        tool_class_loss = CrossEntropyLoss()
+        act_class_loss = BCEWithLogitsLoss()
+        lang_tool_loss = CrossEntropyLoss()
+        lang_act_loss = BCEWithLogitsLoss()
 
     if cfg.MODEL.GROUND_LAYERS_PER_TASK or cfg.MODEL.GROUND_LAYERS_TASK_LAYERS or cfg.MODEL.GROUND_LOSS_PER_TASK: 
         bce_logit = BCEWithLogitsLoss()
@@ -126,11 +137,38 @@ def train_epoch(
                         grounding_preds,_ = preds[task][0]
                         grounding_labels = labels[task][0]
                         loss.append(loss_fun(grounding_preds,grounding_labels.long()))
-                    elif task == 'combs_grounding' or task == 'perms_grounding' or task == 'action_grounding' or task == 'indeps_grounding':
+                    elif task == 'combs_grounding' or task == 'perms_grounding' or task == 'action_grounding' or task == 'indeps_grounding' or task == 'varis_grounding':
                         loss_fun = losses.get_loss_func(complete_loss_funs[idx])(reduction="mean")
-                        grounding_preds,_ = preds[task][0]
+                        grounding_preds,vis_att_mask = preds[task][0]
                         grounding_labels = labels[task][0]
-                        loss.append(loss_fun(grounding_preds,grounding_labels.float()))
+                        if deep:
+                            (grounding_preds, 
+                            tool_presence, 
+                            act_presence, 
+                            tool_class, 
+                            act_class, 
+                            lang_tool, 
+                            lang_act) = grounding_preds
+
+                            tool_presence_labels = meta['tool_presence']
+                            act_presence_labels = meta['act_presence']
+                            tool_class_labels = meta['tool_class']
+                            act_class_labels = meta['act_class']
+                            lang_tool_labels = meta['lang_tool']
+                            lang_act_labels = meta['lang_act']
+                            # breakpoint()
+
+                            loss.append(
+                                        ((1/6)*tool_pres_loss(tool_presence,tool_presence_labels.float()))+
+                                        ((1/6)*act_pres_loss(act_presence, act_presence_labels.float()))+
+                                        ((1/6)*tool_class_loss(tool_class[vis_att_mask==1],tool_class_labels[vis_att_mask==1].long()))+
+                                        ((1/6)*act_class_loss(act_class,act_class_labels.float()))+
+                                        ((1/6)*lang_tool_loss(lang_tool,lang_tool_labels.long()))+
+                                        ((1/6)*lang_act_loss(lang_act,lang_act_labels.float()))+
+                                        loss_fun(grounding_preds,grounding_labels.float())
+                            )
+                        else:
+                            loss.append(loss_fun(grounding_preds,grounding_labels.float()))
                     elif 'phrase' in task:
                         token_ids = meta['token_ids']
                         loss_fun = losses.get_loss_func(complete_loss_funs[idx])(reduction="mean")
@@ -141,14 +179,49 @@ def train_epoch(
                         loss.append(loss_fun(scores,grounding_labels.float()))
                     elif task == 'grounding_inference':
                         if cfg.MODEL.GROUND_LAYERS_PER_TASK or cfg.MODEL.GROUND_LAYERS_TASK_LAYERS:
-                            (tool_preds,action_preds),_ = preds[task][0]
-                            grounding_labels = labels[task]
-                            grounding_labels = grounding_labels.view(len(grounding_labels),cfg.MODEL.MAX_BBOX_NUM, 7, 16)
-                            tool_labels,_ = torch.max(grounding_labels,dim=3)
-                            action_labels,_ = torch.max(grounding_labels,dim=2)
-                            tool_loss = bce_logit(tool_preds, tool_labels.float())
-                            action_loss = bce_logit(action_preds, action_labels.float())
-                            loss.append(tool_loss+action_loss)
+                            if deep:
+                                ((tool_preds,action_preds),tool_presence, 
+                                act_presence, 
+                                tool_class, 
+                                act_class, 
+                                lang_tool, 
+                                lang_act),vis_att_mask = preds[task][0]
+                                grounding_labels = labels[task]
+                                grounding_labels = grounding_labels.view(len(grounding_labels),cfg.MODEL.MAX_BBOX_NUM, 7, 16)
+                                tool_labels,_ = torch.max(grounding_labels,dim=3)
+                                action_labels,_ = torch.max(grounding_labels,dim=2)
+
+                                tool_presence_labels = meta['tool_presence']
+                                act_presence_labels = meta['act_presence']
+                                tool_class_labels = meta['tool_class']
+                                act_class_labels = meta['act_class']
+                                lang_tool_labels = meta['lang_tool'][0]
+                                lang_act_labels = meta['lang_act'][0]
+
+                                tool_loss = bce_logit(tool_preds, tool_labels.float())
+                                action_loss = bce_logit(action_preds, action_labels.float())
+                                loss.append(
+                                            tool_pres_loss(tool_presence,tool_presence_labels.float())+
+                                            act_pres_loss(act_presence, act_presence_labels.float())+
+                                            tool_class_loss(tool_class[vis_att_mask==1],tool_class_labels[vis_att_mask==1].long())+
+                                            act_class_loss(act_class[vis_att_mask==1],act_class_labels[vis_att_mask==1].float())+
+                                            lang_tool_loss(lang_tool,lang_tool_labels.long())+
+                                            lang_act_loss(lang_act,lang_act_labels.float())+
+                                            6*(tool_loss+action_loss)
+                                )
+                            else:
+                                (tool_preds,action_preds),_ = preds[task][0]
+                                grounding_labels = labels[task]
+                                if cfg.MODEL.MAX_PROMPTS==112:
+                                    grounding_labels = grounding_labels.view(len(grounding_labels),cfg.MODEL.MAX_BBOX_NUM, 7, 16)
+                                    tool_labels,_ = torch.max(grounding_labels,dim=3)
+                                    action_labels,_ = torch.max(grounding_labels,dim=2)
+                                    tool_loss = bce_logit(tool_preds, tool_labels.float())
+                                    action_loss = bce_logit(action_preds, action_labels.float())
+                                    loss.append(tool_loss+action_loss)
+                                elif cfg.MODEL.MAX_PROMPTS==16:
+                                    action_loss = bce_logit(action_preds, grounding_labels.float())
+                                    loss.append(action_loss)
                         elif cfg.MODEL.GROUND_LOSS_PER_TASK:
                             grounding_preds,_ = preds[task][0]
                             grounding_preds = grounding_preds.view(len(grounding_preds),cfg.MODEL.MAX_BBOX_NUM, 7, 16)
@@ -163,14 +236,40 @@ def train_epoch(
                             loss.append(tool_loss+action_loss)
                         else:
                             loss_fun = losses.get_loss_func(complete_loss_funs[idx])(reduction="mean")
-                            grounding_preds,_ = preds[task][0]
+                            grounding_preds,vis_att_mask = preds[task][0]
                             grounding_labels = labels[task]
-                            loss.append(loss_fun(grounding_preds,grounding_labels.float()))
+                            if deep:
+                                (grounding_preds, 
+                                tool_presence, 
+                                act_presence, 
+                                tool_class, 
+                                act_class, 
+                                lang_tool, 
+                                lang_act) = grounding_preds
+
+                                tool_presence_labels = meta['tool_presence']
+                                act_presence_labels = meta['act_presence']
+                                tool_class_labels = meta['tool_class']
+                                act_class_labels = meta['act_class']
+                                lang_tool_labels = meta['lang_tool'][0]
+                                lang_act_labels = meta['lang_act'][0]
+                                # breakpoint()
+
+                                loss.append(
+                                            tool_pres_loss(tool_presence,tool_presence_labels.float())+
+                                            act_pres_loss(act_presence, act_presence_labels.float())+
+                                            tool_class_loss(tool_class[vis_att_mask==1],tool_class_labels[vis_att_mask==1].long())+
+                                            act_class_loss(act_class[vis_att_mask==1],act_class_labels[vis_att_mask==1].float())+
+                                            lang_tool_loss(lang_tool,lang_tool_labels.long())+
+                                            lang_act_loss(lang_act,lang_act_labels.float())+
+                                            6*loss_fun(grounding_preds,grounding_labels.float())
+                                )
+                            else:
+                                loss.append(loss_fun(grounding_preds,grounding_labels.float()))
                     else:
                         raise ValueError(task)
 
         if len(complete_tasks) >1:
-            
             final_loss = losses.compute_weighted_loss(loss, cfg.TASKS.LOSS_WEIGHTS)
         else:
             final_loss = loss[0]
@@ -232,6 +331,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
     grounding = any('grounding' in task for task in complete_tasks)
     phrase = any('phrase' in task for task in complete_tasks)
     infere_grounding = 'grounding_inference' in complete_tasks
+    deep = cfg.MODEL.DEEP_SUPERVISION
     
     for cur_iter, (inputs, labels, _, meta, texts) in enumerate(val_loader):
         if cfg.NUM_GPUS:
@@ -278,15 +378,13 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             new_preds = {}
             for task in complete_tasks:
                 if 'grounding' in task:
-                    # breakpoint()
                     if cfg.MODEL.GROUND_LAYERS_PER_TASK or cfg.MODEL.GROUND_LAYERS_TASK_LAYERS:
-                        new_preds[task] = ((preds[task][0][0][0].cpu(),preds[task][0][0][1].cpu()),preds[task][0][1].cpu())
+                        new_preds[task] = ((preds[task][0][0][0][0].cpu(),preds[task][0][0][0][1].cpu()) if deep else (preds[task][0][0][0].cpu(),preds[task][0][0][1].cpu()),preds[task][0][1].cpu())
                     else:
-                        new_preds[task] = (preds[task][0][0].cpu(),preds[task][0][1].cpu())
+                        new_preds[task] = (preds[task][0][0][0].cpu() if deep else preds[task][0][0].cpu(),preds[task][0][1].cpu())
                 else:
                     new_preds[task] = preds[task][0].cpu()
             preds = new_preds
-            # preds = {task: preds[task][0].cpu() if 'grounding' not in task else (preds[task][0][0].cpu(),preds[task][0][1].cpu()) for task in complete_tasks}
             ori_boxes = ori_boxes.cpu()
             metadata = metadata.cpu()
             keep_box = keep_box.cpu()
@@ -316,7 +414,6 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
         # breakpoint()
         # Update and log stats.
         if grounding:
-            # breakpoint()
             grounding_task = complete_tasks[-1]
             gr_names = []
             gr_ids = set([])
@@ -337,13 +434,22 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg):
             else:
                 # breakpoint()
                 if cfg.MODEL.GROUND_LAYERS_PER_TASK or cfg.MODEL.GROUND_LAYERS_TASK_LAYERS:
-                    tool_preds,action_preds = grounding_preds
-                    tool_preds = softmax(tool_preds[vis_att_mask==1],dim=-1)
-                    action_preds = sigmoid(action_preds[vis_att_mask==1])
-                    preds['tools'] = tool_preds
-                    preds['actions'] = action_preds
-                    del preds['grounding_inference']
-                    val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                    if cfg.MODEL.MAX_PROMPTS==112:
+                        tool_preds,action_preds = grounding_preds
+                        tool_preds = softmax(tool_preds[vis_att_mask==1],dim=-1)
+                        action_preds = sigmoid(action_preds[vis_att_mask==1])
+                        preds['tools'] = tool_preds
+                        preds['actions'] = action_preds
+                        del preds['grounding_inference']
+                        val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
+                    elif cfg.MODEL.MAX_PROMPTS==16:
+                        tool_preds,action_preds = grounding_preds
+                        tool_preds = torch.ones((len(keep_box),7))
+                        action_preds = sigmoid(action_preds[vis_att_mask==1])
+                        preds['tools'] = tool_preds
+                        preds['actions'] = action_preds
+                        del preds['grounding_inference']
+                        val_meter.update_stats(preds, keep_box, epoch_bboxes, epoch_names_detect, epoch_names)
                 else:
                     if cfg.MODEL.MAX_PROMPTS==112:
                         grounding_preds = torch.sigmoid(grounding_preds.view(len(inputs[0]),cfg.MODEL.MAX_BBOX_NUM, 7, 16))
@@ -487,6 +593,7 @@ def train(cfg):
     # Set random seed from configs.
     np.random.seed(cfg.RNG_SEED)
     torch.manual_seed(cfg.RNG_SEED)
+    random.seed(cfg.RNG_SEED)
 
     # Setup logging format.
     logging.setup_logging(cfg.OUTPUT_DIR)
@@ -519,7 +626,7 @@ def train(cfg):
         cfg, model, optimizer, scaler if cfg.TRAIN.MIXED_PRECISION else None
     )
     # breakpoint()
-    if any('grounding' in task for task in cfg.TASKS.TASKS) and cfg.TRAIN.PRETRAIN in ['cross','full'] and start_epoch==0:
+    if any(('grounding' in task or 'rarp45' in task) for task in cfg.TASKS.TASKS) and cfg.TRAIN.PRETRAIN in ['cross','full'] and start_epoch==0:
         cu.load_ground_checkpoint(cfg,model)
 
     # Create the video train and val loaders.
@@ -546,7 +653,7 @@ def train(cfg):
         
     # Stats for saving checkpoint:
     complete_tasks = cfg.TASKS.TASKS
-    best_task_map = {task: 0 for task in (complete_tasks if not 'grounding_inference' in complete_tasks else ['tools','actions'])}
+    best_task_map = {task if not 'rarp' in task else 'phases': 0 for task in (complete_tasks if not 'grounding_inference' in complete_tasks else ['tools','actions'])}
     best_mean_map = 0
     epoch_timer = EpochTimer()
     
@@ -580,7 +687,8 @@ def train(cfg):
 
         # Train for one epoch.
         epoch_timer.epoch_tic()
-        train_epoch(
+        if cfg.TRAIN.DATASET == 'rarp45':
+            train_rarp(
             train_loader,
             model,
             optimizer,
@@ -589,6 +697,16 @@ def train(cfg):
             cur_epoch,
             cfg,
         )
+        else:
+            train_epoch(
+                train_loader,
+                model,
+                optimizer,
+                scaler,
+                train_meter,
+                cur_epoch,
+                cfg,
+            )
         epoch_timer.epoch_toc()
         logger.info(
             f"Epoch {cur_epoch} takes {epoch_timer.last_epoch_time():.2f}s. Epochs "
@@ -643,7 +761,10 @@ def train(cfg):
             
         # Evaluate the model on validation set.
         if is_eval_epoch:
-            map_task, mean_map, out_files = eval_epoch(val_loader, model, val_meter, cur_epoch, cfg)
+            if cfg.TRAIN.DATASET == 'rarp45':
+                map_task, mean_map, out_files = eval_rarp(val_loader, model, val_meter, cur_epoch, cfg)
+            else:
+                map_task, mean_map, out_files = eval_epoch(val_loader, model, val_meter, cur_epoch, cfg)
             if (cfg.NUM_GPUS > 1 and du.is_master_proc()) or cfg.NUM_GPUS == 1:
                 main_path = os.path.split(list(out_files.values())[0])[0]
                 fold = main_path.split('/')[-1]
@@ -663,17 +784,17 @@ def train(cfg):
                         scaler if cfg.TRAIN.MIXED_PRECISION else None,
                         )
                     for task in (complete_tasks if not 'grounding_inference' in complete_tasks else ['tools','actions']):
-                        file = out_files[task].split('/')[-1]
+                        file = out_files[task if 'rarp' not in task else 'phases'].split('/')[-1]
                         copy_path = os.path.join(best_preds_path, file.replace('epoch', 'best_all') )
-                        shutil.copyfile(out_files[task], copy_path)
+                        shutil.copyfile(out_files[task if 'rarp' not in task else 'phases'], copy_path)
                 
                 for task in (complete_tasks if not 'grounding_inference' in complete_tasks else ['tools','actions']):
-                    if map_task[task] > best_task_map[task]:
-                        best_task_map[task] = map_task[task]
+                    if map_task[task if 'rarp' not in task else 'phases'] > best_task_map[task if 'rarp' not in task else 'phases']:
+                        best_task_map[task if 'rarp' not in task else 'phases'] = map_task[task if 'rarp' not in task else 'phases']
                         logger.info("Best {} map at epoch {}".format(task, cur_epoch))
-                        file = out_files[task].split('/')[-1]
+                        file = out_files[task if 'rarp' not in task else 'phases'].split('/')[-1]
                         copy_path = os.path.join(best_preds_path, file.replace('epoch', 'best') )
-                        shutil.copyfile(out_files[task], copy_path)
+                        shutil.copyfile(out_files[task if 'rarp' not in task else 'phases'], copy_path)
                         cu.save_best_checkpoint(
                             cfg.OUTPUT_DIR,
                             model,
@@ -682,6 +803,7 @@ def train(cfg):
                             cfg,
                             scaler if cfg.TRAIN.MIXED_PRECISION else None,
                         )
+
     cu.save_checkpoint(
             cfg.OUTPUT_DIR,
             model,

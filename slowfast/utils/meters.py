@@ -59,6 +59,9 @@ class SurgeryMeter(object):
         if 'grounding_inference' in self.tasks:
             self.tasks = ['tools','actions']
             self.all_classes = [7,16]
+        if any('rarp45' in x for x in self.tasks):
+            self.tasks = ["phases"]
+            self.all_classes = [7]
         self.lr = None
         self.loss = ScalarMeter(cfg.LOG_PERIOD)
         self.task_loss = TaskMeter(cfg.LOG_PERIOD, len(self.tasks)) 

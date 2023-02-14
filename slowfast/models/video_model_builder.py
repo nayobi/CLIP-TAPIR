@@ -478,6 +478,7 @@ class MViT(nn.Module):
         self.num_classes = cfg.TASKS.NUM_CLASSES
         self.act_fun = cfg.TASKS.HEAD_ACT
         self.grounding_inference = 'grounding_inference' in self.tasks
+        self.rarp = any('rarp45' in task for task in self.tasks)
         self.tools = 'tools' in self.tasks
         self.actions = 'actions' in self.tasks
         self.phases = 'phases' in self.tasks
@@ -643,7 +644,14 @@ class MViT(nn.Module):
         if cfg.MODEL.TEMPERATURE:
             self.temp = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         for idx, task in enumerate(self.tasks):
-            if task == 'tools' or task == 'actions':
+            if 'rarp45' in task:
+                self.text_encoder = head_helper.TextEncoder(cfg)
+                if 'full' in task:
+                    self.cross_encoder = head_helper.CrossEncoder()
+                self.token_post_projection = nn.Linear(768,768)
+                self.token_pre_projection = nn.Linear(768,768)
+                
+            elif task == 'tools' or task == 'actions':
                 extra_head = head_helper.TransformerRoIHead(
                             cfg,
                             num_classes=self.num_classes[idx],
@@ -687,7 +695,7 @@ class MViT(nn.Module):
                 elif cfg.MODEL.GROUND_LAYERS_PROMPTS_LAYERS:
                     self.grounding_layer = nn.Linear(cfg.MODEL.MAX_PROMPTS,cfg.MODEL.MAX_PROMPTS)
 
-            else:
+            elif not any('rarp45' in x for x in self.tasks):
                 self.add_module("extra_heads_{}".format(task), extra_head)
             
             self.deep = cfg.MODEL.DEEP_SUPERVISION
@@ -789,17 +797,53 @@ class MViT(nn.Module):
 
         # TAPIR head classification
         for task in self.tasks:
+            # breakpoint()
             if self.grounding_inference:
                 extra_head = getattr(self, "extra_heads_{}".format(self.cfg.TRAIN.PRETRAIN_TASK.lower()+'ing'))
-            else:
+            elif not self.rarp:
                 extra_head = getattr(self, "extra_heads_{}".format(task))
             # Take the thw features and the instrument detector features and bboxes
-            if 'grounding' in task:
+            if 'rarp45' == task[:6]:
+                # breakpoint()
+                x = self.token_pre_projection(x)
+                lang_feats, lang_att_mask, cls_tokens = self.text_encoder(texts)
+                x = x.mean(1)
+                x = self.token_post_projection(x)
+
+                if 'full' == task[-4:]:
+                    # breakpoint()
+                    x = x.repeat(len(texts),1,1)
+                    _,x,cls_tokens,_ = self.cross_encoder(lang_feats,
+                                                          lang_att_mask,
+                                                          x,
+                                                          torch.ones(x.shape[:-1]).cuda())
+
+                    if self.cfg.MODEL.L2_NORM:
+                        x = x / x.norm(dim=-1, keepdim=True)
+                        cls_tokens = cls_tokens / cls_tokens.norm(dim=-1, keepdim=True)
+                    
+                    affinity_mat = torch.einsum('ibj,bj->ib',x.permute(1,0,2),cls_tokens)
+                
+                else:
+                    if self.cfg.MODEL.L2_NORM:
+                        x = x / x.norm(dim=-1, keepdim=True)
+                        cls_tokens = cls_tokens / cls_tokens.norm(dim=-1, keepdim=True)
+
+                    affinity_mat = x @ cls_tokens.t()
+
+                if self.cfg.MODEL.TEMPERATURE:
+                    affinity_mat = affinity_mat * self.temp.exp()
+                
+                out[task].append(affinity_mat)
+
+            elif 'grounding' in task:
                 out_features, vis_att_mask, vis_tokens = extra_head(x, bboxes, features)
                 lang_feats, lang_att_mask, cls_tokens = self.text_encoder(texts)
 
                 if task == 'grounding_inference':
                     afinity_matrixes = []
+                    if self.deep:
+                        altern_vis_outs = []
                     for i in range(len(x)):
                         this_vis_feats = out_features[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1,1)
                         this_att_mask = vis_att_mask[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1)
@@ -813,9 +857,13 @@ class MViT(nn.Module):
                         if self.cfg.MODEL.L2_NORM:
                             out_vis = out_vis / out_vis.norm(dim=-1,keepdim=True)
                             lang_cls = lang_cls / lang_cls.norm(dim=-1,keepdim=True)
+                        if self.deep:
+                            altern_vis_outs.append(alter_vis_out)
                         afinity_matrixes.append(torch.einsum('bij,bj->bi',out_vis,lang_cls))
                     # breakpoint()
                     affinity_mat = torch.stack(afinity_matrixes,dim=0).permute(0,2,1)
+                    if self.deep:
+                        alter_vis_out = torch.stack(altern_vis_outs,dim=0)[:,0]
 
                     if self.cfg.MODEL.GROUND_LAYERS_PER_TASK:
                         affinity_mat = affinity_mat.view(len(x),self.cfg.MODEL.MAX_BBOX_NUM, 7, 16)

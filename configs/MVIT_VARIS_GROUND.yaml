@@ -1,14 +1,14 @@
 TRAIN:
   ENABLE: True
   DATASET: ava
-  BATCH_SIZE: 8
-  EVAL_PERIOD: 1
+  BATCH_SIZE: 25
+  EVAL_PERIOD: 3
   CHECKPOINT_PERIOD: 1
   AUTO_RESUME: True
 DATA:
   NUM_FRAMES: 16
   SAMPLING_RATE: 1
-  TRAIN_JITTER_SCALES: [256, 320]
+  TRAIN_JITTER_SCALES: [256, 300]
   TRAIN_CROP_SIZE: 224
   TEST_CROP_SIZE: 224
   INPUT_CHANNEL_NUM: [3]
@@ -20,12 +20,11 @@ AVA:
   ANNOTATION_DIR: /home/nfvalderrama/MICCAI2022/data/annotations/ava_surgery_faster_features/fold1/annotations
   FRAME_DIR: /home/nfvalderrama/MICCAI2022/data/PSIAVA/modified_keyframes
   TRAIN_PREDICT_BOX_LISTS: ["train_preds.csv"]
+  TRAIN_USE_COLOR_AUGMENTATION: True
   TEST_PREDICT_BOX_LISTS: ["val_preds.csv"]
   EXCLUSION_FILE: ""
   GROUNDTRUTH_FILE: "val.csv"
   FULL_TEST_ON_VAL: True
-  TRAIN_USE_COLOR_AUGMENTATION: True
-  TRAIN_PCA_JITTER_ONLY: True
 MVIT:
   ZERO_DECAY_POS_CLS: False
   NUM_HEADS: 1
@@ -80,16 +79,17 @@ MODEL:
   MODEL_NAME: MViT
   LOSS_FUNC: soft_cross_entropy
   DROPOUT_RATE: 0.5
+  MAX_SEQUENCE_LENGTH: 40
 TASKS:
-  TASKS:  ["tools"]
-  NUM_CLASSES: [7]
-  LOSS_FUNC: ["cross_entropy"] 
+  TASKS:  ["varis_grounding"]
+  NUM_CLASSES: [16]
+  LOSS_FUNC: ["bce_logit"]
   HEAD_ACT:  ["softmax"]
-  LOSS_WEIGHTS:  [1.0]   
+  LOSS_WEIGHTS:  [1.0]
 TEST:
-  ENABLE: False
+  ENABLE: True
   DATASET: ava
-  BATCH_SIZE: 18
+  BATCH_SIZE: 25
 DATA_LOADER:
   NUM_WORKERS: 10
   PIN_MEMORY: True
