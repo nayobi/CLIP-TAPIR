@@ -2,9 +2,9 @@
 FOLD="2" 
 TEXT_ENCODER="biobert"
 TASK="GROUND_INFERE"
-PRETRAIN_TASK="COMBS_GROUND"
-CHECKPOINT="/media/SSD0/nayobi/Endovis/MICCAI2023/TAPIR/outputs/log/"$PRETRAIN_TASK"/TAPIR_"$TEXT_ENCODER"_deep_mlp/Fold2/checkpoint_best_mean.pyth"
-EXP_NAME="TAPIR_"$TEXT_ENCODER"_"$PRETRAIN_TASK"_deep_mlp_per_task"
+PRETRAIN_TASK="INDEPS_GROUND"
+CHECKPOINT="/media/SSD0/nayobi/Endovis/MICCAI2023/TAPIR/outputs/log/"$PRETRAIN_TASK"/TAPIR_"$TEXT_ENCODER"_cont_pret/Fold2/checkpoint_best_mean.pyth"
+EXP_NAME="TAPIR_"$TEXT_ENCODER"_"$PRETRAIN_TASK"_cont_pret_prompt_layers"
 
 #-------------------------
 DATA_VER="psi-ava"
@@ -42,9 +42,8 @@ AVA.COCO_ANN_DIR $COCO_ANN_PATH \
 BN.NUM_BATCHES_PRECISE 72 \
 FASTER.FEATURES_TRAIN $FF_TRAIN \
 FASTER.FEATURES_VAL $FF_VAL \
-MODEL.GROUND_LAYERS_PER_TASK True \
+MODEL.GROUND_LAYERS_TASK_LAYERS True \
 MODEL.MLP True \
-MODEL.DEEP_SUPERVISION True \
 OUTPUT_DIR $OUTPUT_DIR 
 
 # ##############################################################################################

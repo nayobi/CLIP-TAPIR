@@ -842,28 +842,46 @@ class MViT(nn.Module):
 
                 if task == 'grounding_inference':
                     afinity_matrixes = []
-                    if self.deep:
-                        altern_vis_outs = []
-                    for i in range(len(x)):
-                        this_vis_feats = out_features[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1,1)
-                        this_att_mask = vis_att_mask[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1)
-                        _,out_vis,lang_cls, alter_vis_out = self.cross_encoder(lang_feats,
-                                                                lang_att_mask,
-                                                                this_vis_feats,
-                                                                this_att_mask)
-                        if self.cfg.MODEL.BATCH_NORM or self.cfg.MODEL.LAYER_NORM:
-                            out_vis = self.vis_norm(out_vis)
-                            lang_cls = self.lang_norm(lang_cls)
-                        if self.cfg.MODEL.L2_NORM:
-                            out_vis = out_vis / out_vis.norm(dim=-1,keepdim=True)
-                            lang_cls = lang_cls / lang_cls.norm(dim=-1,keepdim=True)
-                        if self.deep:
-                            altern_vis_outs.append(alter_vis_out)
-                        afinity_matrixes.append(torch.einsum('bij,bj->bi',out_vis,lang_cls))
                     # breakpoint()
-                    affinity_mat = torch.stack(afinity_matrixes,dim=0).permute(0,2,1)
-                    if self.deep:
-                        alter_vis_out = torch.stack(altern_vis_outs,dim=0)[:,0]
+                    Bs,Nb,Fl = out_features.shape
+                    this_vis_feats = out_features.repeat(self.cfg.MODEL.MAX_PROMPTS,1,1,1)
+                    this_vis_feats = this_vis_feats.view(self.cfg.MODEL.MAX_PROMPTS*Bs,Nb,Fl)
+                    this_vis_att_mask = vis_att_mask.repeat(self.cfg.MODEL.MAX_PROMPTS,1,1)
+                    this_vis_att_mask = this_vis_att_mask.view(self.cfg.MODEL.MAX_PROMPTS*Bs,Nb)
+
+                    Ts,Sl,Fl = lang_feats.shape
+                    this_lang_feats = lang_feats.repeat(Bs,1,1,1)
+                    this_lang_feats = this_lang_feats.permute(1,0,2,3).contiguous().view(self.cfg.MODEL.MAX_PROMPTS*Bs,Sl,Fl)
+                    this_lang_att_mask = lang_att_mask.repeat(Bs,1,1)
+                    this_lang_att_mask = this_lang_att_mask.permute(1,0,2).contiguous().view(self.cfg.MODEL.MAX_PROMPTS*Bs,Sl)
+
+                    _, out_vis, lang_cls, _ = self.cross_encoder(this_lang_feats, this_lang_att_mask, this_vis_feats, this_vis_att_mask)
+
+                    affinity_mat = torch.einsum('bij,bj->bi',out_vis,lang_cls)
+                    affinity_mat = affinity_mat.view(Ts,Bs,Nb).permute(1,2,0)
+
+                    # if self.deep:
+                    #     altern_vis_outs = []
+                    # for i in range(len(x)):
+                    #     this_vis_feats = out_features[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1,1)
+                    #     this_att_mask = vis_att_mask[i].repeat(self.cfg.MODEL.MAX_PROMPTS,1)
+                    #     _,out_vis,lang_cls, alter_vis_out = self.cross_encoder(lang_feats,
+                    #                                             lang_att_mask,
+                    #                                             this_vis_feats,
+                    #                                             this_att_mask)
+                    #     if self.cfg.MODEL.BATCH_NORM or self.cfg.MODEL.LAYER_NORM:
+                    #         out_vis = self.vis_norm(out_vis)
+                    #         lang_cls = self.lang_norm(lang_cls)
+                    #     if self.cfg.MODEL.L2_NORM:
+                    #         out_vis = out_vis / out_vis.norm(dim=-1,keepdim=True)
+                    #         lang_cls = lang_cls / lang_cls.norm(dim=-1,keepdim=True)
+                    #     if self.deep:
+                    #         altern_vis_outs.append(alter_vis_out)
+                    #     afinity_matrixes.append(torch.einsum('bij,bj->bi',out_vis,lang_cls))
+                    # # breakpoint()
+                    # affinity_mat = torch.stack(afinity_matrixes,dim=0).permute(0,2,1)
+                    # if self.deep:
+                    #     alter_vis_out = torch.stack(altern_vis_outs,dim=0)[:,0]
 
                     if self.cfg.MODEL.GROUND_LAYERS_PER_TASK:
                         affinity_mat = affinity_mat.view(len(x),self.cfg.MODEL.MAX_BBOX_NUM, 7, 16)

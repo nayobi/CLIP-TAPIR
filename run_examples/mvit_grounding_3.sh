@@ -150,9 +150,10 @@
 FOLD="2" 
 TEXT_ENCODER="biobert"
 TASK="INDEPS_GROUND"
-CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/INSTRUMENTS/checkpoint_best_tools_fold"$FOLD".pyth"  
+# CHECKPOINT="/media/SSD0/nayobi/All_datasets/PSI-AVA/TAPIR_trained_models/INSTRUMENTS/checkpoint_best_tools_fold"$FOLD".pyth"  
+CHECKPOINT="/media/SSD0/nayobi/Endovis/MICCAI2023/TAPIR/outputs/log/RARP/TAPIR_biobert_RARP_norm/checkpoints/checkpoint_epoch_00015.pyth" 
 LANG_CHECK="/media/SSD0/nayobi/Endovis/MICCAI2023/PNG/model_final.pth"
-EXP_NAME="TAPIR_"$TEXT_ENCODER"_just_actions_l2"
+EXP_NAME="TAPIR_"$TEXT_ENCODER"_cont_pret"
 
 #-------------------------
 DATA_VER="psi-ava"
@@ -191,6 +192,5 @@ BN.NUM_BATCHES_PRECISE 72 \
 FASTER.FEATURES_TRAIN $FF_TRAIN \
 FASTER.FEATURES_VAL $FF_VAL \
 TRAIN.PRETRAIN 'cross' \
-MODEL.JUST_ACTIONS True \
-MODEL.L2_NORM True \
+MODEL.MLP True \
 OUTPUT_DIR $OUTPUT_DIR 

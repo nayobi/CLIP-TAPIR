@@ -20,17 +20,24 @@ def save_json(data, json_file, indent=4):
     with open(json_file, "w") as f:
         json.dump(data, f, indent=indent)
 
+# def get_img_ann_dict(coco_anns):
+#     img_ann_dict = {}
+#     id2name = {}
+#     for img in coco_anns["images"]:
+#         img_name = img["file_name"]
+#         img_ann_dict[img_name] = []
+#         id2name[img['id']] = img_name
+    
+#     for idx,ann in tqdm(enumerate(coco_anns["annotations"]),desc='Annotations'):
+#         img_ann_dict[id2name[ann['image_id']]]=idx
+#         # [idx for idx, ann in enumerate(coco_anns["annotations"]) if ann["image_name"] == img_name]
+#     return img_ann_dict
+
 def get_img_ann_dict(coco_anns):
     img_ann_dict = {}
-    id2name = {}
     for img in coco_anns["images"]:
         img_name = img["file_name"]
-        img_ann_dict[img_name] = []
-        id2name[img['id']] = img_name
-    
-    for idx,ann in tqdm(enumerate(coco_anns["annotations"]),desc='Annotations'):
-        img_ann_dict[id2name[ann['image_id']]]=idx
-        # [idx for idx, ann in enumerate(coco_anns["annotations"]) if ann["image_name"] == img_name]
+        img_ann_dict[img_name] = [idx for idx, ann in enumerate(coco_anns["annotations"]) if ann["image_name"] == img_name]
     return img_ann_dict
 
 def eval_task(task, coco_anns, preds, visualization):
